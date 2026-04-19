@@ -4,5 +4,6 @@ dist
 .env
 .env.*
 coverage
+.badges
 *.log
 docs/session-handoff.md
