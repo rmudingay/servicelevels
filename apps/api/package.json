@@ -9,8 +9,8 @@
     "worker": "tsx src/worker.ts",
     "worker:dev": "tsx watch src/worker.ts",
     "build": "tsc -p tsconfig.json",
-    "coverage": "c8 --check-coverage --branches 50 --functions 50 --lines 50 --statements 50 --reporter=text --reporter=lcov --reporter=json-summary node --import tsx --test test/**/*.test.ts",
-    "test": "node --import tsx --test test/**/*.test.ts",
+    "coverage": "c8 --check-coverage --branches 50 --functions 50 --lines 50 --statements 50 --reporter=text --reporter=lcov --reporter=json-summary node --import tsx --test test/*.test.ts",
+    "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
