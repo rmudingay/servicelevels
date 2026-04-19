@@ -1,7 +1,7 @@
 # Service Levels application
 
-![API coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/rmudingay/servicelevels/badges/badges/api-coverage.json)
-![Web coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/rmudingay/servicelevels/badges/badges/web-coverage.json)
+![API coverage](https://img.shields.io/endpoint?cacheSeconds=300&url=https%3A%2F%2Fraw.githubusercontent.com%2Frmudingay%2Fservicelevels%2Fbadges%2Fbadges%2Fapi-coverage.json)
+![Web coverage](https://img.shields.io/endpoint?cacheSeconds=300&url=https%3A%2F%2Fraw.githubusercontent.com%2Frmudingay%2Fservicelevels%2Fbadges%2Fbadges%2Fweb-coverage.json)
 
 Service Levels application is a multi-tenant status application for monitored environments. It provides a public status page, an authenticated admin console, scheduled collection from monitoring platforms, and a normalized status model for presenting high-level service health without querying monitoring backends directly from the browser.
 
