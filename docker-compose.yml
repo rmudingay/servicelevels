@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: service_levels
+      POSTGRES_USER: service_levels
+      POSTGRES_PASSWORD: service_levels
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U service_levels -d service_levels"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: "8080"
+      APP_NAME: "Service Levels application"
+      DATABASE_URL: "postgresql://service_levels:service_levels@db:5432/service_levels"
+      THEME_DEFAULT: "dark"
+      PUBLIC_AUTH_MODE: "public"
+      ADMIN_USERNAME: "admin"
+      ADMIN_PASSWORD: "change-me"
+      JWT_SECRET: "dev-secret-change-me"
+      CORS_ORIGIN: "http://localhost:5173"
+      WORKER_TICK_SECONDS: "60"
+    ports:
+      - "8080:8080"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    working_dir: /app
+    command: ["npm", "run", "start:worker"]
+    environment:
+      PORT: "8080"
+      APP_NAME: "Service Levels application"
+      DATABASE_URL: "postgresql://service_levels:service_levels@db:5432/service_levels"
+      THEME_DEFAULT: "dark"
+      PUBLIC_AUTH_MODE: "public"
+      ADMIN_USERNAME: "admin"
+      ADMIN_PASSWORD: "change-me"
+      JWT_SECRET: "dev-secret-change-me"
+      CORS_ORIGIN: "http://localhost:5173"
+      WORKER_TICK_SECONDS: "60"
