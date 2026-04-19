@@ -7,7 +7,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -39,6 +39,9 @@ jobs:
 
       - name: Coverage
         run: npm run coverage
+
+      - name: Generate coverage badges
+        run: node scripts/generate-coverage-badges.mjs
 
       - name: Build
         run: npm run build
@@ -79,3 +82,42 @@ jobs:
           name: web-coverage
           path: apps/web/coverage
           if-no-files-found: ignore
+
+      - name: Publish coverage badges
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+
+          remote_url="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          publish_dir="$(mktemp -d)"
+
+          if git clone --depth 1 --branch badges "${remote_url}" "${publish_dir}"; then
+            :
+          else
+            rm -rf "${publish_dir}"
+            publish_dir="$(mktemp -d)"
+            git init "${publish_dir}"
+            cd "${publish_dir}"
+            git checkout --orphan badges
+            git remote add origin "${remote_url}"
+          fi
+
+          mkdir -p "${publish_dir}/badges"
+          cp .badges/api-coverage.json "${publish_dir}/badges/api-coverage.json"
+          cp .badges/web-coverage.json "${publish_dir}/badges/web-coverage.json"
+          touch "${publish_dir}/.nojekyll"
+
+          cd "${publish_dir}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add badges .nojekyll
+
+          if git diff --cached --quiet; then
+            echo "Coverage badges are unchanged."
+            exit 0
+          fi
+
+          git commit -m "Update coverage badges for ${GITHUB_SHA}"
+          git push origin HEAD:badges
