@@ -91,6 +91,7 @@ jobs:
           set -eu
 
           remote_url="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          workspace_dir="${GITHUB_WORKSPACE}"
           publish_dir="$(mktemp -d)"
 
           if git clone --depth 1 --branch badges "${remote_url}" "${publish_dir}"; then
@@ -105,8 +106,8 @@ jobs:
           fi
 
           mkdir -p "${publish_dir}/badges"
-          cp .badges/api-coverage.json "${publish_dir}/badges/api-coverage.json"
-          cp .badges/web-coverage.json "${publish_dir}/badges/web-coverage.json"
+          cp "${workspace_dir}/.badges/api-coverage.json" "${publish_dir}/badges/api-coverage.json"
+          cp "${workspace_dir}/.badges/web-coverage.json" "${publish_dir}/badges/web-coverage.json"
           touch "${publish_dir}/.nojekyll"
 
           cd "${publish_dir}"
