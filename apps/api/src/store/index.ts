@@ -9,7 +9,7 @@ export type RepositoryBundle = {
 };
 
 export async function createRepository(config: AppConfig): Promise<RepositoryBundle> {
-  const databaseUrl = process.env.DATABASE_URL;
+  const databaseUrl = config.databaseUrl;
   if (!databaseUrl) {
     return {
       repo: new MemoryStore(config),
@@ -24,4 +24,3 @@ export async function createRepository(config: AppConfig): Promise<RepositoryBun
     close: () => repo.close()
   };
 }
-

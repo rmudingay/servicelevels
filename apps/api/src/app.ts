@@ -6,11 +6,16 @@ import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { AppConfig } from "./config.js";
+import { registerObservability } from "./observability.js";
 import { createRepository } from "./store/index.js";
 import { registerRoutes } from "./routes.js";
 
 export async function buildApp(config: AppConfig): Promise<ReturnType<typeof fastify>> {
-  const app = fastify({ logger: true });
+  const app = fastify({
+    logger: {
+      level: config.logLevel
+    }
+  });
   const { repo, close } = await createRepository(config);
 
   app.register(cookie);
@@ -35,6 +40,7 @@ export async function buildApp(config: AppConfig): Promise<ReturnType<typeof fas
     reply.type("text/plain").send("Service Levels application API");
   });
 
+  registerObservability(app, config.appName);
   await registerRoutes(app, repo, config);
 
   app.setNotFoundHandler(async (request, reply) => {

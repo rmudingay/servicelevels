@@ -21,3 +21,29 @@ test("status API exposes the current snapshot and daily summaries", async () => 
     await app.close();
   }
 });
+
+test("observability endpoints expose liveness, readiness, and Prometheus metrics", async () => {
+  const app = await buildApp(loadConfig({}));
+  try {
+    const live = await app.inject({
+      method: "GET",
+      url: "/livez"
+    });
+    const ready = await app.inject({
+      method: "GET",
+      url: "/readyz"
+    });
+    const metrics = await app.inject({
+      method: "GET",
+      url: "/metrics"
+    });
+
+    assert.equal(live.statusCode, 200);
+    assert.equal(ready.statusCode, 200);
+    assert.equal(metrics.statusCode, 200);
+    assert.match(metrics.body, /service_levels_http_requests_total/);
+    assert.match(metrics.body, /service_levels_app_info/);
+  } finally {
+    await app.close();
+  }
+});

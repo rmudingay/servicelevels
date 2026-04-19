@@ -10,6 +10,7 @@
     "start:api": "npm exec --workspace @service-levels/api tsx src/index.ts",
     "start:worker": "npm run worker --workspace @service-levels/api",
     "build": "npm run build --workspace @service-levels/shared && npm run build --workspace @service-levels/api && npm run build --workspace @service-levels/web",
+    "coverage": "npm run coverage --workspace @service-levels/api && npm run coverage --workspace @service-levels/web",
     "test": "npm run test --workspace @service-levels/api && npm run test --workspace @service-levels/web",
     "typecheck": "npm run typecheck --workspace @service-levels/shared && npm run typecheck --workspace @service-levels/api && npm run typecheck --workspace @service-levels/web",
     "lint": "npm run lint --workspace @service-levels/api && npm run lint --workspace @service-levels/web"

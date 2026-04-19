@@ -1,12 +1,45 @@
+import { readFileSync } from "node:fs";
 import { z } from "zod";
+
+const logLevelSchema = z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]);
+
+function trimTrailingNewlines(value: string): string {
+  return value.replace(/[\r\n]+$/, "");
+}
+
+function resolveFileBackedEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const resolved: NodeJS.ProcessEnv = { ...env };
+
+  for (const [key, value] of Object.entries(env)) {
+    if (!key.endsWith("_FILE") || typeof value !== "string" || value.length === 0) {
+      continue;
+    }
+
+    const targetKey = key.slice(0, -5);
+    if (resolved[targetKey]) {
+      continue;
+    }
+
+    try {
+      resolved[targetKey] = trimTrailingNewlines(readFileSync(value, "utf8"));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      throw new Error(`Unable to read secret file for ${targetKey}: ${message}`);
+    }
+  }
+
+  return resolved;
+}
 
 const configSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8080),
+  LOG_LEVEL: logLevelSchema.default("info"),
   APP_NAME: z.string().default("Service Levels application"),
   LOGO_URL: z.string().default(""),
   FAVICON_URL: z.string().default(""),
   THEME_DEFAULT: z.enum(["light", "dark"]).default("dark"),
   APP_BASE_URL: z.string().default("http://localhost:8080"),
+  DATABASE_URL: z.string().default(""),
   PUBLIC_AUTH_MODE: z.enum(["public", "ip", "local", "ldap", "saml", "oauth", "oidc"]).default("public"),
   ADMIN_AUTH_MODES: z.string().default("local"),
   ADMIN_USERNAME: z.string().default("admin"),
@@ -59,11 +92,13 @@ const configSchema = z.object({
 
 export type AppConfig = {
   port: number;
+  logLevel: z.infer<typeof logLevelSchema>;
   appName: string;
   logoUrl: string;
   faviconUrl: string;
   themeDefault: "light" | "dark";
   appBaseUrl: string;
+  databaseUrl: string;
   publicAuthMode: "public" | "ip" | "local" | "ldap" | "saml" | "oauth" | "oidc";
   adminAuthModes: Array<"public" | "ip" | "local" | "ldap" | "saml" | "oauth" | "oidc">;
   adminUsername: string;
@@ -125,14 +160,16 @@ export type AppConfig = {
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const parsed = configSchema.parse(env);
+  const parsed = configSchema.parse(resolveFileBackedEnv(env));
   return {
     port: parsed.PORT,
+    logLevel: parsed.LOG_LEVEL,
     appName: parsed.APP_NAME,
     logoUrl: parsed.LOGO_URL,
     faviconUrl: parsed.FAVICON_URL,
     themeDefault: parsed.THEME_DEFAULT,
     appBaseUrl: parsed.APP_BASE_URL,
+    databaseUrl: parsed.DATABASE_URL,
     publicAuthMode: parsed.PUBLIC_AUTH_MODE,
     adminAuthModes: parsed.ADMIN_AUTH_MODES.split(",").map((entry) => entry.trim()).filter(Boolean) as AppConfig["adminAuthModes"],
     adminUsername: parsed.ADMIN_USERNAME,

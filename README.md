@@ -1,5 +1,8 @@
 # Service Levels application
 
+![API coverage](https://img.shields.io/badge/API%20coverage-53.11%25-yellowgreen)
+![Web coverage](https://img.shields.io/badge/Web%20coverage-33.84%25-orange)
+
 Service Levels application is a multi-tenant status application for monitored environments. It provides a public status page, an authenticated admin console, scheduled collection from monitoring platforms, and a normalized status model for presenting high-level service health without querying monitoring backends directly from the browser.
 
 The current implementation includes:
@@ -56,11 +59,15 @@ These defaults are suitable only for local development. Change them before any s
 
 The API and worker use the same configuration model. Common settings include:
 - `DATABASE_URL`
+- `DATABASE_URL_FILE`
 - `APP_NAME`
+- `LOG_LEVEL`
 - `PUBLIC_AUTH_MODE`
 - `ADMIN_USERNAME`
 - `ADMIN_PASSWORD`
+- `ADMIN_PASSWORD_FILE`
 - `JWT_SECRET`
+- `JWT_SECRET_FILE`
 - `WORKER_TICK_SECONDS`
 
 For production, you should also provide the relevant connector and auth configuration:
@@ -68,6 +75,23 @@ For production, you should also provide the relevant connector and auth configur
 - LDAP settings if using LDAP auth
 - SAML or OIDC settings if using SSO
 - Slack and SMTP settings if using notifications
+
+Sensitive configuration supports Docker-style file-backed secrets. Any supported variable can be provided as either `NAME=value` or `NAME_FILE=/run/secrets/name`. File-backed settings are resolved at startup before validation.
+
+### Observability
+
+The API exposes lightweight operational endpoints:
+- `/healthz`: compatibility health check
+- `/livez`: liveness probe
+- `/readyz`: readiness probe
+- `/metrics`: Prometheus-compatible metrics
+
+The metrics endpoint includes:
+- process and runtime metrics from `prom-client`
+- HTTP request counts
+- HTTP request duration histograms
+
+The API log level is controlled with `LOG_LEVEL`.
 
 ### Local Development
 
@@ -124,4 +148,14 @@ Good contribution areas include:
 ## License
 
 This project is licensed under the BSD 3-Clause License. See [LICENSE](LICENSE).
+
+## CI
+
+GitHub Actions validates:
+- type checking
+- coverage thresholds
+- production build
+- Docker image build
+
+Coverage artifacts for the API and web application are uploaded from each CI run.
 # servicelevels
