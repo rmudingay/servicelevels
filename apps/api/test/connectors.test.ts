@@ -5,6 +5,8 @@ import type { ConnectorCollectionContext } from "../src/connectors/shared.js";
 import { collectPrometheusConnector } from "../src/connectors/prometheus.js";
 import { collectZabbixConnector } from "../src/connectors/zabbix.js";
 import { collectPrtgConnector } from "../src/connectors/prtg.js";
+import { collectConnector } from "../src/connectors/index.js";
+import { demoConnectorOutcome } from "../src/connectors/demo.js";
 
 const tenant: Tenant = {
   id: "tenant-primary-site",
@@ -184,4 +186,43 @@ test("PRTG connector normalizes sensor warnings into degraded status", async () 
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("collectConnector skips ingress-only webhook connectors and demo outcomes can simulate errors", async () => {
+  const webhookService: ServiceDefinition = {
+    id: "svc-webhook",
+    tenantId: tenant.id,
+    name: "Webhook Sink",
+    slug: "webhook-sink",
+    category: "platform",
+    topic: "automation",
+    tags: ["webhook"],
+    sourceType: "webhook",
+    sourceRef: "ops",
+    enabled: true
+  };
+  const webhookConnector = buildConnector("webhook", JSON.stringify({ sourceKey: "ops" }));
+  const context = buildContext(webhookConnector, webhookService);
+
+  const collected = await collectConnector(context);
+  assert.equal(collected.results.length, 0);
+  assert.equal(collected.run.status, "success");
+  assert.equal((collected.rawPayload as { skipped?: boolean }).skipped, true);
+
+  const errorOutcome = demoConnectorOutcome(
+    {
+      ...context,
+      connector: {
+        ...webhookConnector,
+        type: "prometheus",
+        name: "Demo collector"
+      }
+    },
+    JSON.stringify({
+      simulateError: true,
+      errorMessage: "demo failure"
+    })
+  );
+  assert.equal(errorOutcome.run.status, "error");
+  assert.equal(errorOutcome.run.errorMessage, "demo failure");
 });

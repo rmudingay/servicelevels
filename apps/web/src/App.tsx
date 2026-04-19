@@ -19,7 +19,7 @@ import type {
   Tenant
 } from "@service-levels/shared";
 
-function statusRank(status: StatusLevel): number {
+export function statusRank(status: StatusLevel): number {
   switch (status) {
     case "healthy":
       return 0;
@@ -34,7 +34,7 @@ function statusRank(status: StatusLevel): number {
   }
 }
 
-function bannerMatchesScope(banner: Banner, tenant: Tenant, tab?: TabDefinition, service?: ServiceDefinition): boolean {
+export function bannerMatchesScope(banner: Banner, tenant: Tenant, tab?: TabDefinition, service?: ServiceDefinition): boolean {
   if (!banner.active) {
     return false;
   }
@@ -56,7 +56,7 @@ function bannerMatchesScope(banner: Banner, tenant: Tenant, tab?: TabDefinition,
   return false;
 }
 
-function matchesFilter(service: ServiceDefinition, filterQuery: string): boolean {
+export function matchesFilter(service: ServiceDefinition, filterQuery: string): boolean {
   const query = filterQuery.trim();
   if (!query) {
     return true;
@@ -84,7 +84,7 @@ function matchesFilter(service: ServiceDefinition, filterQuery: string): boolean
   });
 }
 
-function statusLabel(status: StatusLevel): string {
+export function statusLabel(status: StatusLevel): string {
   switch (status) {
     case "healthy":
       return "Healthy";
@@ -99,11 +99,11 @@ function statusLabel(status: StatusLevel): string {
   }
 }
 
-function colorFor(status: StatusLevel, colors: ColorMapping[]): string {
+export function colorFor(status: StatusLevel, colors: ColorMapping[]): string {
   return colors.find((entry) => entry.statusKey === status)?.colorHex ?? "#7A7F87";
 }
 
-function authModeLabel(mode: AuthMode): string {
+export function authModeLabel(mode: AuthMode): string {
   switch (mode) {
     case "public":
       return "Public";
@@ -124,17 +124,23 @@ function authModeLabel(mode: AuthMode): string {
   }
 }
 
-function authModeUsesPassword(mode: AuthMode): boolean {
+export function authModeUsesPassword(mode: AuthMode): boolean {
   return mode === "local" || mode === "ldap";
 }
 
-function authModeUsesRedirect(mode: AuthMode): boolean {
+export function authModeUsesRedirect(mode: AuthMode): boolean {
   return mode === "oauth" || mode === "oidc" || mode === "saml";
 }
 
-function currentReturnPath(): string {
+export function currentReturnPath(): string {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
+
+export const browserRedirect = {
+  assign(url: string): void {
+    window.location.assign(url);
+  }
+};
 
 function Shell({
   title,
@@ -259,7 +265,7 @@ export function StatusPage() {
   async function handleStatusLogin(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (authModeUsesRedirect(loginMode)) {
-      window.location.assign(api.ssoStartUrl(loginMode as "oidc" | "oauth" | "saml", "status", currentReturnPath()));
+      browserRedirect.assign(api.ssoStartUrl(loginMode as "oidc" | "oauth" | "saml", "status", currentReturnPath()));
       return;
     }
     try {
@@ -654,7 +660,7 @@ export function AdminPage() {
   });
   const [editingConnectorId, setEditingConnectorId] = useState<string | null>(null);
 
-  async function refresh(): Promise<void> {
+  async function refresh(currentSession: { user: unknown; meta: AppMeta & { adminAuthModes: AuthMode[] } } | null = me): Promise<void> {
     const [meta, view, brandingValue, colorValues, tabValues, connectorValues, healthValue, userValues, incidentValues, maintenanceValues, subscriptionValues] = await Promise.all([
       api.meta(),
       api.status(tenantSlug),
@@ -678,7 +684,7 @@ export function AdminPage() {
     setIncidents(incidentValues);
     setMaintenance(maintenanceValues);
     setSubscriptions(subscriptionValues);
-    setMe((current) => (current ? { ...current, meta } : current));
+    setMe(currentSession ? { ...currentSession, meta } : currentSession);
   }
 
   useEffect(() => {
@@ -687,7 +693,7 @@ export function AdminPage() {
       .me()
       .then(async (current) => {
         setMe(current);
-        await refresh();
+        await refresh(current);
       })
       .catch(() => {
         setMe(null);
@@ -703,7 +709,7 @@ export function AdminPage() {
   async function handleLogin(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (authModeUsesRedirect(loginMode)) {
-      window.location.assign(api.ssoStartUrl(loginMode as "oidc" | "oauth" | "saml", "admin", currentReturnPath()));
+      browserRedirect.assign(api.ssoStartUrl(loginMode as "oidc" | "oauth" | "saml", "admin", currentReturnPath()));
       return;
     }
     try {
@@ -712,8 +718,10 @@ export function AdminPage() {
         username: authModeUsesPassword(loginMode) ? username : undefined,
         password: authModeUsesPassword(loginMode) ? password : undefined
       });
+      const current = await api.me();
+      setMe(current);
       setMessage("Authenticated.");
-      await refresh();
+      await refresh(current);
     } catch {
       setMessage("Invalid credentials.");
     }

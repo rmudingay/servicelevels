@@ -24,7 +24,7 @@ type SsoTestOverrides = {
     requestUrl?: URL,
     samlBody?: Record<string, string>
   ) => Promise<BrowserSsoLoginResult>;
-  getSamlMetadata?: (config: AppConfig) => string;
+  getSamlMetadata?: (config: AppConfig) => Promise<string> | string;
 };
 
 type SsoState = {
@@ -410,10 +410,10 @@ export async function completeBrowserSsoLogin(
   return { user, returnTo: state.returnTo };
 }
 
-export function getSamlMetadata(config: AppConfig): string {
+export async function getSamlMetadata(config: AppConfig): Promise<string> {
   if (testOverrides?.getSamlMetadata) {
-    return testOverrides.getSamlMetadata(config);
+    return await testOverrides.getSamlMetadata(config);
   }
   const saml = getSamlInstance(config);
-  return saml.generateServiceProviderMetadata(null, config.saml.publicCert || null);
+  return await Promise.resolve(saml.generateServiceProviderMetadata(null, config.saml.publicCert || null));
 }

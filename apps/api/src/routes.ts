@@ -279,7 +279,8 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
 
   app.get("/api/v1/auth/sso/saml/metadata", async (_request, reply) => {
     try {
-      reply.type("application/xml; charset=utf-8").send(getSamlMetadata(config));
+      const metadata = await getSamlMetadata(config);
+      reply.type("application/xml; charset=utf-8").send(metadata);
     } catch (error) {
       reply.code(400).send({ error: error instanceof Error ? error.message : "SAML is not configured" });
     }
