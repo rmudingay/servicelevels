@@ -46,5 +46,6 @@ test("saveSnapshot stores the latest snapshot and daily rollups", async () => {
   assert.equal(today?.overallStatus, "down");
   assert.equal(yesterday?.secondsByStatus.healthy, 600);
   assert.equal(today?.secondsByStatus.healthy, 600);
-  assert.equal(today?.sampleCount, 2);
+  assert.equal(yesterday?.sampleCount, 1);
+  assert.equal(today?.sampleCount, 1);
 });

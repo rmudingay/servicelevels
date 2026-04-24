@@ -10,6 +10,19 @@ import { registerObservability } from "./observability.js";
 import { createRepository } from "./store/index.js";
 import { registerRoutes } from "./routes.js";
 
+function parseCorsOrigin(value: string): string | string[] {
+  const origins = value
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (origins.length === 0) {
+    return value;
+  }
+
+  return origins.length === 1 ? origins[0] : origins;
+}
+
 export async function buildApp(config: AppConfig): Promise<ReturnType<typeof fastify>> {
   const app = fastify({
     logger: {
@@ -21,7 +34,7 @@ export async function buildApp(config: AppConfig): Promise<ReturnType<typeof fas
   app.register(cookie);
   app.register(formbody);
   app.register(cors, {
-    origin: config.corsOrigin,
+    origin: parseCorsOrigin(config.corsOrigin),
     credentials: true
   });
 

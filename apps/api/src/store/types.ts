@@ -44,6 +44,9 @@ export interface StatusRepository {
   ): Promise<AdminUser>;
   updateBranding(input: Partial<Branding>): Promise<Branding>;
   updateColors(tenantId: string, updates: Array<{ statusKey: StatusLevel; colorHex: string; label: string }>): Promise<ColorMapping[]>;
+  createTenant(input: Omit<Tenant, "id">): Promise<Tenant>;
+  updateTenant(tenantId: string, patch: Partial<Tenant>): Promise<Tenant | null>;
+  deleteTenant(tenantId: string): Promise<boolean>;
   createSubscription(tenantId: string, input: Omit<NotificationSubscription, "id" | "tenantId">): Promise<NotificationSubscription>;
   deleteSubscription(subscriptionId: string): Promise<boolean>;
   createConnector(tenantId: string, input: Omit<IntegrationConnector, "id" | "tenantId" | "lastSuccessAt" | "lastErrorAt">): Promise<IntegrationConnector>;
@@ -51,6 +54,7 @@ export interface StatusRepository {
   deleteConnector(connectorId: string): Promise<boolean>;
   createBanner(tenantId: string, input: Omit<Banner, "id" | "tenantId">): Promise<Banner>;
   updateBanner(bannerId: string, patch: Partial<Banner>): Promise<Banner | null>;
+  deleteBanner(bannerId: string): Promise<boolean>;
   toggleBanner(bannerId: string): Promise<Banner | null>;
   createIncident(tenantId: string, input: Omit<Incident, "id" | "tenantId">): Promise<Incident>;
   resolveIncident(incidentId: string, resolvedAt?: string): Promise<Incident | null>;

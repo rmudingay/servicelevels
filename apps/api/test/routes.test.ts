@@ -357,6 +357,35 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
   try {
     const cookieHeader = await loginAsAdmin(app);
 
+    const tenantCreate = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/tenants",
+      headers: {
+        cookie: cookieHeader
+      },
+      payload: {
+        name: "Secondary Site",
+        slug: "secondary-site",
+        description: "Additional logical location",
+        enabled: true
+      }
+    });
+    assert.equal(tenantCreate.statusCode, 201);
+    const tenant = tenantCreate.json() as { id: string; slug: string };
+
+    const tenantPatch = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/admin/tenants/${tenant.id}`,
+      headers: {
+        cookie: cookieHeader
+      },
+      payload: {
+        description: "Updated logical location",
+        enabled: false
+      }
+    });
+    assert.equal(tenantPatch.statusCode, 200);
+
     const connectorCreate = await app.inject({
       method: "POST",
       url: "/api/v1/admin/connectors",
@@ -441,6 +470,21 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
     assert.equal(bannerToggle.statusCode, 200);
     assert.equal((bannerToggle.json() as { active: boolean }).active, false);
 
+    const bannerPatch = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/admin/banners/${banner.id}`,
+      headers: {
+        cookie: cookieHeader
+      },
+      payload: {
+        message: "Failover validation completed.",
+        severity: "healthy",
+        active: true
+      }
+    });
+    assert.equal(bannerPatch.statusCode, 200);
+    assert.equal((bannerPatch.json() as { message: string; severity: string; active: boolean }).severity, "healthy");
+
     const subscriptionCreate = await app.inject({
       method: "POST",
       url: "/api/v1/admin/subscriptions",
@@ -498,7 +542,8 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
     });
     assert.equal(colorsUpdate.statusCode, 200);
 
-    const [tabs, banners, subscriptions, branding, colors, bootstrap, summary, collectionHealth] = await Promise.all([
+    const [tenants, tabs, banners, subscriptions, branding, colors, bootstrap, summary, collectionHealth] = await Promise.all([
+      app.inject({ method: "GET", url: "/api/v1/admin/tenants", headers: { cookie: cookieHeader } }),
       app.inject({ method: "GET", url: "/api/v1/admin/tabs?tenant=primary-site", headers: { cookie: cookieHeader } }),
       app.inject({ method: "GET", url: "/api/v1/admin/banners?tenant=primary-site", headers: { cookie: cookieHeader } }),
       app.inject({ method: "GET", url: "/api/v1/admin/subscriptions?tenant=primary-site", headers: { cookie: cookieHeader } }),
@@ -509,6 +554,7 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
       app.inject({ method: "GET", url: "/api/v1/admin/collection-health", headers: { cookie: cookieHeader } })
     ]);
 
+    assert.equal(tenants.statusCode, 200);
     assert.equal(tabs.statusCode, 200);
     assert.equal(banners.statusCode, 200);
     assert.equal(subscriptions.statusCode, 200);
@@ -519,6 +565,15 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
     assert.equal(collectionHealth.statusCode, 200);
     assert.equal((bootstrap.json() as { connectorCount: number }).connectorCount > 0, true);
 
+    const bannerDelete = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/admin/banners/${banner.id}`,
+      headers: {
+        cookie: cookieHeader
+      }
+    });
+    assert.equal(bannerDelete.statusCode, 200);
+
     const connectorDelete = await app.inject({
       method: "DELETE",
       url: `/api/v1/admin/connectors/${connector.id}`,
@@ -527,6 +582,15 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
       }
     });
     assert.equal(connectorDelete.statusCode, 200);
+
+    const tenantDelete = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/admin/tenants/${tenant.id}`,
+      headers: {
+        cookie: cookieHeader
+      }
+    });
+    assert.equal(tenantDelete.statusCode, 200);
   } finally {
     await app.close();
   }

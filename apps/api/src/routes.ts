@@ -14,8 +14,8 @@ import {
 import { buildStatusFeed } from "./notifications.js";
 import type { AppConfig } from "./config.js";
 import type { StatusRepository } from "./store/types.js";
-import { nowIso } from "./utils.js";
-import type { Banner, StatusLevel } from "@service-levels/shared";
+import { nowIso, slugify } from "./utils.js";
+import type { Banner, StatusLevel, Tenant } from "@service-levels/shared";
 import { ingestWebhookEvent } from "./worker/pipeline.js";
 
 async function buildRss(store: StatusRepository, tenantSlug?: string): Promise<string> {
@@ -388,6 +388,82 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
 
   app.get("/api/v1/admin/tenants", { preHandler: requireAdmin(store, config) }, async () => store.getTenants());
 
+  app.post("/api/v1/admin/tenants", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
+    const body = request.body as Partial<Pick<Tenant, "slug" | "name" | "description" | "enabled">>;
+    const name = body.name?.trim();
+    const slug = slugify(body.slug?.trim() || name || "");
+    if (!name || !slug) {
+      reply.code(400).send({ error: "Tenant name is required" });
+      return;
+    }
+    const existing = (await store.getTenants()).find((tenant) => tenant.slug === slug);
+    if (existing) {
+      reply.code(409).send({ error: "Tenant slug already exists" });
+      return;
+    }
+    const tenant = await store.createTenant({
+      slug,
+      name,
+      description: body.description?.trim() ?? "",
+      enabled: body.enabled ?? true
+    });
+    reply.code(201).send(tenant);
+  });
+
+  app.patch("/api/v1/admin/tenants/:id", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
+    const params = request.params as { id: string };
+    const body = request.body as Partial<Pick<Tenant, "slug" | "name" | "description" | "enabled">>;
+    const patch: Partial<Tenant> = {};
+    if (body.name !== undefined) {
+      const name = body.name.trim();
+      if (!name) {
+        reply.code(400).send({ error: "Tenant name cannot be empty" });
+        return;
+      }
+      patch.name = name;
+    }
+    if (body.slug !== undefined) {
+      const slug = slugify(body.slug);
+      if (!slug) {
+        reply.code(400).send({ error: "Tenant slug cannot be empty" });
+        return;
+      }
+      const duplicate = (await store.getTenants()).find((tenant) => tenant.slug === slug && tenant.id !== params.id);
+      if (duplicate) {
+        reply.code(409).send({ error: "Tenant slug already exists" });
+        return;
+      }
+      patch.slug = slug;
+    }
+    if (body.description !== undefined) {
+      patch.description = body.description;
+    }
+    if (body.enabled !== undefined) {
+      patch.enabled = body.enabled;
+    }
+    const updated = await store.updateTenant(params.id, patch);
+    if (!updated) {
+      reply.code(404).send({ error: "Tenant not found" });
+      return;
+    }
+    reply.send(updated);
+  });
+
+  app.delete("/api/v1/admin/tenants/:id", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
+    const params = request.params as { id: string };
+    const tenants = await store.getTenants();
+    if (tenants.length <= 1) {
+      reply.code(400).send({ error: "Cannot delete the last tenant" });
+      return;
+    }
+    const removed = await store.deleteTenant(params.id);
+    if (!removed) {
+      reply.code(404).send({ error: "Tenant not found" });
+      return;
+    }
+    reply.send({ ok: true });
+  });
+
   app.get("/api/v1/admin/tabs", { preHandler: requireAdmin(store, config) }, async (request) => {
     const tenantSlug = parseTenantSlug(request.query as Record<string, unknown>);
     const tenants = await store.getTenants();
@@ -527,6 +603,27 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
       active: true
     });
     reply.code(201).send(banner);
+  });
+
+  app.patch("/api/v1/admin/banners/:id", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
+    const params = request.params as { id: string };
+    const body = request.body as Partial<Pick<Banner, "scopeType" | "scopeRef" | "title" | "message" | "severity" | "startsAt" | "endsAt" | "active">>;
+    const updated = await store.updateBanner(params.id, body);
+    if (!updated) {
+      reply.code(404).send({ error: "Banner not found" });
+      return;
+    }
+    reply.send(updated);
+  });
+
+  app.delete("/api/v1/admin/banners/:id", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
+    const params = request.params as { id: string };
+    const removed = await store.deleteBanner(params.id);
+    if (!removed) {
+      reply.code(404).send({ error: "Banner not found" });
+      return;
+    }
+    reply.send({ ok: true });
   });
 
   app.post("/api/v1/admin/subscriptions", { preHandler: requireAdmin(store, config) }, async (request, reply) => {

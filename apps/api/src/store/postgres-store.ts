@@ -229,6 +229,16 @@ function createEmptyDailySummary(tenantId: string, day: string, observedAt: stri
   };
 }
 
+function defaultColorsForTenant(tenantId: string): ColorMapping[] {
+  return [
+    { tenantId, statusKey: "healthy", colorHex: "#3BB273", label: "Healthy" },
+    { tenantId, statusKey: "degraded", colorHex: "#D9A441", label: "Degraded" },
+    { tenantId, statusKey: "down", colorHex: "#D94B4B", label: "Down" },
+    { tenantId, statusKey: "maintenance", colorHex: "#4A90E2", label: "Maintenance" },
+    { tenantId, statusKey: "unknown", colorHex: "#7A7F87", label: "Unknown" }
+  ];
+}
+
 function addObservation(summary: StatusDailySummary, status: StatusLevel, observedAt: string): void {
   summary.overallStatus = mergeSummaryStatus(summary.overallStatus, status);
   summary.sampleCount += 1;
@@ -513,6 +523,78 @@ export class PostgresStore implements StatusRepository {
     return this.getColors(tenantId);
   }
 
+  async createTenant(input: Omit<Tenant, "id">): Promise<Tenant> {
+    const tenant: Tenant = {
+      ...input,
+      id: `tenant-${slugify(input.slug || input.name)}-${Date.now()}`
+    };
+    const tab: TabDefinition = {
+      id: `tab-global-${tenant.slug}-${Date.now()}`,
+      tenantId: tenant.id,
+      title: "Global",
+      slug: "global",
+      sortOrder: 1,
+      filterQuery: "",
+      isGlobal: true,
+      enabled: true
+    };
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("INSERT INTO tenants (id, slug, name, description, enabled) VALUES ($1,$2,$3,$4,$5)", [
+        tenant.id,
+        tenant.slug,
+        tenant.name,
+        tenant.description,
+        tenant.enabled
+      ]);
+      await client.query(
+        "INSERT INTO tabs (id, tenant_id, title, slug, sort_order, filter_query, is_global, enabled) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+        [tab.id, tenant.id, tab.title, tab.slug, tab.sortOrder, tab.filterQuery, tab.isGlobal, tab.enabled]
+      );
+      for (const color of defaultColorsForTenant(tenant.id)) {
+        await client.query("INSERT INTO colors (tenant_id, status_key, color_hex, label) VALUES ($1,$2,$3,$4)", [
+          color.tenantId,
+          color.statusKey,
+          color.colorHex,
+          color.label
+        ]);
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    await this.loadState();
+    return tenant;
+  }
+
+  async updateTenant(tenantId: string, patch: Partial<Tenant>): Promise<Tenant | null> {
+    this.ensureState();
+    const current = this.state!.tenants.find((tenant) => tenant.id === tenantId);
+    if (!current) {
+      return null;
+    }
+    const next = { ...current, ...patch, id: tenantId };
+    const result = await this.pool.query("UPDATE tenants SET slug = $1, name = $2, description = $3, enabled = $4 WHERE id = $5 RETURNING *", [
+      next.slug,
+      next.name,
+      next.description,
+      next.enabled,
+      tenantId
+    ]);
+    await this.loadState();
+    return result.rows[0] ? mapTenant(result.rows[0]) : null;
+  }
+
+  async deleteTenant(tenantId: string): Promise<boolean> {
+    const result = await this.pool.query("DELETE FROM tenants WHERE id = $1", [tenantId]);
+    await this.loadState();
+    return (result.rowCount ?? 0) > 0;
+  }
+
   async createSubscription(tenantId: string, input: Omit<NotificationSubscription, "id" | "tenantId">): Promise<NotificationSubscription> {
     const subscription: NotificationSubscription = {
       ...input,
@@ -676,6 +758,12 @@ export class PostgresStore implements StatusRepository {
       return null;
     }
     return this.updateBanner(bannerId, { active: !current.active });
+  }
+
+  async deleteBanner(bannerId: string): Promise<boolean> {
+    const result = await this.pool.query("DELETE FROM banners WHERE id = $1", [bannerId]);
+    await this.loadState();
+    return (result.rowCount ?? 0) > 0;
   }
 
   async createTab(tenantId: string, input: Omit<TabDefinition, "id" | "tenantId">): Promise<TabDefinition> {

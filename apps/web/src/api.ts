@@ -14,7 +14,9 @@ import type {
   AuthMode
 } from "@service-levels/shared";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ??
+  (typeof window === "undefined" ? "http://localhost:8080" : `${window.location.protocol}//${window.location.hostname}:8080`);
 
 export class ApiError extends Error {
   status: number;
@@ -89,6 +91,20 @@ export const api = {
         }>;
       }>;
     }>("/api/v1/admin/collection-health"),
+  createTenant: (body: { name: string; slug: string; description: string; enabled: boolean }) =>
+    fetchJson<Tenant>("/api/v1/admin/tenants", {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
+  updateTenant: (id: string, body: Partial<Pick<Tenant, "name" | "slug" | "description" | "enabled">>) =>
+    fetchJson<Tenant | null>(`/api/v1/admin/tenants/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body)
+    }),
+  deleteTenant: (id: string) =>
+    fetchJson<{ ok: boolean }>(`/api/v1/admin/tenants/${id}`, {
+      method: "DELETE"
+    }),
   createTab: (body: { tenantSlug: string; title: string; filterQuery: string; isGlobal: boolean }) =>
     fetchJson<TabDefinition>("/api/v1/admin/tabs", {
       method: "POST",
@@ -187,6 +203,19 @@ export const api = {
     fetchJson<Banner>("/api/v1/admin/banners", {
       method: "POST",
       body: JSON.stringify(body)
+    }),
+  updateBanner: (id: string, body: Partial<Pick<Banner, "scopeType" | "scopeRef" | "title" | "message" | "severity" | "startsAt" | "endsAt" | "active">>) =>
+    fetchJson<Banner | null>(`/api/v1/admin/banners/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body)
+    }),
+  deleteBanner: (id: string) =>
+    fetchJson<{ ok: boolean }>(`/api/v1/admin/banners/${id}`, {
+      method: "DELETE"
+    }),
+  toggleBanner: (id: string) =>
+    fetchJson<Banner>(`/api/v1/admin/banners/${id}/toggle`, {
+      method: "POST"
     }),
   createSubscription: (body: {
     tenantSlug: string;

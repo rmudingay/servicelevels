@@ -33,7 +33,13 @@ const mockApi = vi.hoisted(() => ({
   subscriptions: vi.fn(),
   login: vi.fn(),
   logout: vi.fn(),
+  createTenant: vi.fn(),
+  updateTenant: vi.fn(),
+  deleteTenant: vi.fn(),
   createBanner: vi.fn(),
+  updateBanner: vi.fn(),
+  deleteBanner: vi.fn(),
+  toggleBanner: vi.fn(),
   createSubscription: vi.fn(),
   deleteSubscription: vi.fn(),
   createTab: vi.fn(),
@@ -72,7 +78,7 @@ function buildMeta(): AppMeta & { adminAuthModes: AuthMode[] } {
     appName: "Service Levels application",
     logoUrl: "",
     faviconUrl: "",
-    themeDefault: "dark",
+    themeDefault: "light",
     publicAuthMode: "public",
     adminAuthModes: ["local"]
   };
@@ -381,7 +387,7 @@ describe("status UI", () => {
     });
   });
 
-  it("renders the current status, scoped banners, incidents, maintenance, and daily summary", async () => {
+  it("renders the current status in a Cachet-style public layout", async () => {
     mockApi.status.mockResolvedValue(buildStatusView());
 
     render(
@@ -394,14 +400,10 @@ describe("status UI", () => {
     expect(screen.getByText("Portal notice")).toBeInTheDocument();
     expect(screen.getByText("Router degraded")).toBeInTheDocument();
     expect(screen.getByText("Metrics rollout")).toBeInTheDocument();
-    expect(screen.getByText("Daily summary")).toBeInTheDocument();
-    expect(screen.getByText("2026-04-20")).toBeInTheDocument();
-    expect(screen.getByText("Prometheus rollout in progress")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Network" }));
-
-    expect(screen.getByText("Core Router")).toBeInTheDocument();
-    expect(screen.queryByText("Metrics Pipeline")).not.toBeInTheDocument();
+    expect(screen.getByText("Past Incidents")).toBeInTheDocument();
+    expect(screen.getByText("Some systems are experiencing issues")).toBeInTheDocument();
+    expect(screen.getByText("Deploying Prometheus rules.")).toBeInTheDocument();
+    expect(screen.getAllByText("Core Router").length).toBeGreaterThan(0);
     expect(screen.getByText(/Investigating transient route instability/)).toBeInTheDocument();
   });
 
@@ -574,7 +576,7 @@ describe("admin UI", () => {
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "change-me" } });
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
-    expect(await screen.findByText("Authenticated admin session active.")).toBeInTheDocument();
+    expect(await screen.findByText(/Authenticated admin session active/)).toBeInTheDocument();
     expect(mockApi.login).toHaveBeenCalledWith({
       mode: "local",
       username: "admin",
@@ -614,7 +616,7 @@ describe("admin UI", () => {
     assignSpy.mockRestore();
   });
 
-  it("executes the main admin workflows for connectors, users, notifications, branding, tabs, colors, banners, and logout", async () => {
+  it("executes the main admin workflows through modal forms", async () => {
     const view = buildStatusView();
     primeAuthenticatedAdminMocks(view);
     mockApi.users.mockResolvedValue([
@@ -634,6 +636,12 @@ describe("admin UI", () => {
     mockApi.createTab.mockResolvedValue(view.tabs[0]);
     mockApi.updateColors.mockResolvedValue(view.colors);
     mockApi.createBanner.mockResolvedValue(view.banners[0]);
+    mockApi.updateBanner.mockResolvedValue(view.banners[0]);
+    mockApi.deleteBanner.mockResolvedValue({ ok: true });
+    mockApi.toggleBanner.mockResolvedValue(view.banners[0]);
+    mockApi.createTenant.mockResolvedValue({ id: "tenant-new-site", slug: "new-site", name: "New Site", description: "New logical site", enabled: true });
+    mockApi.updateTenant.mockResolvedValue(view.tenants[0]);
+    mockApi.deleteTenant.mockResolvedValue({ ok: true });
     mockApi.logout.mockResolvedValue({ ok: true });
 
     render(
@@ -642,46 +650,64 @@ describe("admin UI", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("Authenticated admin session active.")).toBeInTheDocument();
-    expect(screen.getByText("Prometheus cluster")).toBeInTheDocument();
-    expect(screen.getByText("Connectors due: 1 / 1")).toBeInTheDocument();
+    expect(await screen.findByText(/Authenticated admin session active/)).toBeInTheDocument();
+    expect(screen.getByText("Collection health")).toBeInTheDocument();
 
-    const connectorsPanel = screen.getByText("Connectors").closest("article");
-    expect(connectorsPanel).not.toBeNull();
-    const connectorScope = within(connectorsPanel as HTMLElement);
-    fireEvent.change(connectorScope.getByLabelText("Name"), { target: { value: "Webhook intake" } });
+    fireEvent.click(screen.getByRole("button", { name: "Tenants" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create tenant" }));
+    let dialog = screen.getByRole("dialog");
+    let tenantScope = within(dialog);
+    fireEvent.change(tenantScope.getByLabelText("Tenant name"), { target: { value: "New Site" } });
+    fireEvent.change(tenantScope.getByLabelText("URL slug"), { target: { value: "new-site" } });
+    fireEvent.change(tenantScope.getByLabelText("Description"), { target: { value: "New logical site" } });
+    fireEvent.click(tenantScope.getByRole("button", { name: "Create tenant" }));
+    await waitFor(() => {
+      expect(mockApi.createTenant).toHaveBeenCalledWith({
+        name: "New Site",
+        slug: "new-site",
+        description: "New logical site",
+        enabled: true
+      });
+    });
+    fireEvent.change(screen.getByLabelText("Current tenant"), { target: { value: "primary-site" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Connectors" }));
+    expect(screen.getByText("Prometheus cluster")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create connector" }));
+    dialog = screen.getByRole("dialog");
+    let connectorScope = within(dialog);
+    fireEvent.change(connectorScope.getByLabelText(/Display name/), { target: { value: "Webhook intake" } });
     fireEvent.change(connectorScope.getByLabelText("Type"), { target: { value: "webhook" } });
-    fireEvent.change(connectorScope.getByLabelText("Poll interval seconds"), { target: { value: "600" } });
     fireEvent.click(connectorScope.getByRole("button", { name: "Create connector" }));
     await waitFor(() => {
-      expect(mockApi.createConnector).toHaveBeenCalledWith({
+      expect(mockApi.createConnector).toHaveBeenCalledWith(expect.objectContaining({
         tenantSlug: "primary-site",
         type: "webhook",
         name: "Webhook intake",
-        configJson: "{\n  \"filters\": []\n}",
-        authJson: "{\n  \"username\": \"\",\n  \"password\": \"\"\n}",
         enabled: true,
-        pollIntervalSeconds: 600
-      });
+        pollIntervalSeconds: 300
+      }));
     });
 
-    fireEvent.click(connectorScope.getByRole("button", { name: "Edit" }));
-    await waitFor(() => {
-      expect(connectorScope.getByRole("button", { name: "Save connector" })).toBeInTheDocument();
-    });
-    fireEvent.change(connectorScope.getByLabelText("Name"), { target: { value: "Prometheus cluster updated" } });
+    const connectorRow = screen.getByText("Prometheus cluster").closest(".list-group-item");
+    expect(connectorRow).not.toBeNull();
+    fireEvent.click(within(connectorRow as HTMLElement).getByRole("button", { name: "Edit" }));
+    dialog = screen.getByRole("dialog");
+    connectorScope = within(dialog);
+    fireEvent.change(connectorScope.getByLabelText(/Display name/), { target: { value: "Prometheus cluster updated" } });
     fireEvent.click(connectorScope.getByRole("button", { name: "Save connector" }));
     await waitFor(() => {
       expect(mockApi.updateConnector).toHaveBeenCalledWith("connector-prometheus", expect.objectContaining({ name: "Prometheus cluster updated" }));
     });
-    fireEvent.click(connectorScope.getByRole("button", { name: "Delete" }));
+    fireEvent.click(within(connectorRow as HTMLElement).getByRole("button", { name: "Delete" }));
     await waitFor(() => {
       expect(mockApi.deleteConnector).toHaveBeenCalledWith("connector-prometheus");
     });
 
-    const usersPanel = screen.getByText("Users").closest("article");
-    expect(usersPanel).not.toBeNull();
-    const usersScope = within(usersPanel as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Access" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create user" }));
+    dialog = screen.getByRole("dialog");
+    const usersScope = within(dialog);
     fireEvent.change(usersScope.getByLabelText("Username"), { target: { value: "newuser" } });
     fireEvent.change(usersScope.getByLabelText("Display name"), { target: { value: "New User" } });
     fireEvent.change(usersScope.getByLabelText("Email"), { target: { value: "new@example.org" } });
@@ -697,18 +723,19 @@ describe("admin UI", () => {
         enabled: true
       });
     });
-    fireEvent.click(usersScope.getByRole("button", { name: "Promote" }));
+    fireEvent.click(screen.getByRole("button", { name: "Promote" }));
     await waitFor(() => {
       expect(mockApi.promoteUser).toHaveBeenCalledWith("user-viewer");
     });
-    fireEvent.click(usersScope.getByRole("button", { name: "Demote" }));
+    fireEvent.click(screen.getByRole("button", { name: "Demote" }));
     await waitFor(() => {
       expect(mockApi.demoteUser).toHaveBeenCalledWith("user-ops");
     });
 
-    const notificationsPanel = screen.getByText("Notifications").closest("article");
-    expect(notificationsPanel).not.toBeNull();
-    const notificationsScope = within(notificationsPanel as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create subscription" }));
+    dialog = screen.getByRole("dialog");
+    const notificationsScope = within(dialog);
     fireEvent.change(notificationsScope.getByLabelText("Target"), { target: { value: "alerts@example.org" } });
     fireEvent.change(notificationsScope.getByLabelText("Channel"), { target: { value: "email" } });
     fireEvent.click(notificationsScope.getByRole("button", { name: "Create subscription" }));
@@ -721,23 +748,26 @@ describe("admin UI", () => {
         enabled: true
       });
     });
-    fireEvent.click(notificationsScope.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => {
       expect(mockApi.deleteSubscription).toHaveBeenCalledWith("subscription-slack");
     });
 
-    const brandingPanel = screen.getByText("Branding").closest("article");
-    expect(brandingPanel).not.toBeNull();
-    const brandingScope = within(brandingPanel as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+    const brandingRow = screen.getByText("Branding").closest(".list-group-item");
+    expect(brandingRow).not.toBeNull();
+    fireEvent.click(within(brandingRow as HTMLElement).getByRole("button", { name: "Edit" }));
+    dialog = screen.getByRole("dialog");
+    const brandingScope = within(dialog);
     fireEvent.change(brandingScope.getByLabelText("Application name"), { target: { value: "Service Levels" } });
     fireEvent.click(brandingScope.getByRole("button", { name: "Save branding" }));
     await waitFor(() => {
       expect(mockApi.updateBranding).toHaveBeenCalledWith(expect.objectContaining({ appName: "Service Levels" }));
     });
 
-    const tabsPanel = screen.getByText("Tabs").closest("article");
-    expect(tabsPanel).not.toBeNull();
-    const tabsScope = within(tabsPanel as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Create tab" }));
+    dialog = screen.getByRole("dialog");
+    const tabsScope = within(dialog);
     fireEvent.change(tabsScope.getByLabelText("Title"), { target: { value: "Critical" } });
     fireEvent.change(tabsScope.getByLabelText("Filter query"), { target: { value: "tag:critical" } });
     fireEvent.click(tabsScope.getByRole("button", { name: "Create tab" }));
@@ -750,9 +780,11 @@ describe("admin UI", () => {
       });
     });
 
-    const colorsPanel = screen.getByText("Status colors").closest("article");
-    expect(colorsPanel).not.toBeNull();
-    const colorsScope = within(colorsPanel as HTMLElement);
+    const colorsRow = screen.getByText("Status colors").closest(".list-group-item");
+    expect(colorsRow).not.toBeNull();
+    fireEvent.click(within(colorsRow as HTMLElement).getByRole("button", { name: "Edit" }));
+    dialog = screen.getByRole("dialog");
+    const colorsScope = within(dialog);
     fireEvent.change(colorsScope.getByDisplayValue("#D9A441"), { target: { value: "#FFB400" } });
     fireEvent.click(colorsScope.getByRole("button", { name: "Save colors" }));
     await waitFor(() => {
@@ -762,9 +794,10 @@ describe("admin UI", () => {
       );
     });
 
-    const bannerPanel = screen.getByText("Banner composer").closest("article");
-    expect(bannerPanel).not.toBeNull();
-    const bannerScope = within(bannerPanel as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Banners" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish banner" }));
+    dialog = screen.getByRole("dialog");
+    let bannerScope = within(dialog);
     fireEvent.change(bannerScope.getByLabelText("Title"), { target: { value: "Operator update" } });
     fireEvent.change(bannerScope.getByLabelText("Message"), { target: { value: "Teams are validating routing paths." } });
     fireEvent.click(bannerScope.getByRole("button", { name: "Publish banner" }));
@@ -777,6 +810,26 @@ describe("admin UI", () => {
         message: "Teams are validating routing paths.",
         severity: "maintenance"
       });
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    dialog = screen.getByRole("dialog");
+    bannerScope = within(dialog);
+    fireEvent.change(bannerScope.getByLabelText("Message"), { target: { value: "Message updated." } });
+    fireEvent.change(bannerScope.getByLabelText("Severity"), { target: { value: "healthy" } });
+    fireEvent.click(bannerScope.getByRole("button", { name: "Save banner" }));
+    await waitFor(() => {
+      expect(mockApi.updateBanner).toHaveBeenCalledWith("banner-global", expect.objectContaining({ message: "Message updated.", severity: "healthy" }));
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Unpublish" })[0]);
+    await waitFor(() => {
+      expect(mockApi.toggleBanner).toHaveBeenCalledWith("banner-global");
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    await waitFor(() => {
+      expect(mockApi.deleteBanner).toHaveBeenCalledWith("banner-global");
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Logout" }));

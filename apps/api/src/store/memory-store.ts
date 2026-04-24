@@ -85,6 +85,16 @@ function cloneSummary(summary: StatusDailySummary): StatusDailySummary {
   };
 }
 
+function defaultColorsForTenant(tenantId: string): ColorMapping[] {
+  return [
+    { tenantId, statusKey: "healthy", colorHex: "#3BB273", label: "Healthy" },
+    { tenantId, statusKey: "degraded", colorHex: "#D9A441", label: "Degraded" },
+    { tenantId, statusKey: "down", colorHex: "#D94B4B", label: "Down" },
+    { tenantId, statusKey: "maintenance", colorHex: "#4A90E2", label: "Maintenance" },
+    { tenantId, statusKey: "unknown", colorHex: "#7A7F87", label: "Unknown" }
+  ];
+}
+
 function ensureDailySummary(state: InternalState, tenantId: string, day: string): StatusDailySummary {
   const existing = state.dailySummaries.find((entry) => entry.tenantId === tenantId && entry.day === day);
   if (existing) {
@@ -512,6 +522,58 @@ export class MemoryStore {
     return this.getColors(tenantId);
   }
 
+  async createTenant(input: Omit<Tenant, "id">): Promise<Tenant> {
+    const tenant: Tenant = {
+      ...input,
+      id: `tenant-${slugify(input.slug || input.name)}-${Date.now()}`
+    };
+    this.state.tenants = [...this.state.tenants, tenant];
+    this.state.tabs = [
+      ...this.state.tabs,
+      {
+        id: `tab-global-${tenant.slug}-${Date.now()}`,
+        tenantId: tenant.id,
+        title: "Global",
+        slug: "global",
+        sortOrder: 1,
+        filterQuery: "",
+        isGlobal: true,
+        enabled: true
+      }
+    ];
+    this.state.colors = [...this.state.colors, ...defaultColorsForTenant(tenant.id)];
+    return tenant;
+  }
+
+  async updateTenant(tenantId: string, patch: Partial<Tenant>): Promise<Tenant | null> {
+    const index = this.state.tenants.findIndex((tenant) => tenant.id === tenantId);
+    if (index < 0) {
+      return null;
+    }
+    const next = { ...this.state.tenants[index], ...patch, id: tenantId };
+    this.state.tenants[index] = next;
+    return next;
+  }
+
+  async deleteTenant(tenantId: string): Promise<boolean> {
+    const before = this.state.tenants.length;
+    this.state.tenants = this.state.tenants.filter((tenant) => tenant.id !== tenantId);
+    if (this.state.tenants.length === before) {
+      return false;
+    }
+    this.state.tabs = this.state.tabs.filter((entry) => entry.tenantId !== tenantId);
+    this.state.services = this.state.services.filter((entry) => entry.tenantId !== tenantId);
+    this.state.connectors = this.state.connectors.filter((entry) => entry.tenantId !== tenantId);
+    this.state.banners = this.state.banners.filter((entry) => entry.tenantId !== tenantId);
+    this.state.incidents = this.state.incidents.filter((entry) => entry.tenantId !== tenantId);
+    this.state.maintenance = this.state.maintenance.filter((entry) => entry.tenantId !== tenantId);
+    this.state.subscriptions = this.state.subscriptions.filter((entry) => entry.tenantId !== tenantId);
+    this.state.colors = this.state.colors.filter((entry) => entry.tenantId !== tenantId);
+    this.state.snapshots = this.state.snapshots.filter((entry) => entry.tenantId !== tenantId);
+    this.state.dailySummaries = this.state.dailySummaries.filter((entry) => entry.tenantId !== tenantId);
+    return true;
+  }
+
   async createSubscription(tenantId: string, input: Omit<NotificationSubscription, "id" | "tenantId">): Promise<NotificationSubscription> {
     const subscription: NotificationSubscription = {
       ...input,
@@ -630,6 +692,12 @@ export class MemoryStore {
     const next = { ...current, active: !current.active };
     this.state.banners[index] = next;
     return next;
+  }
+
+  async deleteBanner(bannerId: string): Promise<boolean> {
+    const before = this.state.banners.length;
+    this.state.banners = this.state.banners.filter((banner) => banner.id !== bannerId);
+    return this.state.banners.length !== before;
   }
 
   async createTab(tenantId: string, input: Omit<TabDefinition, "id" | "tenantId">): Promise<TabDefinition> {
