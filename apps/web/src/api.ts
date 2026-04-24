@@ -156,6 +156,10 @@ export const api = {
     authJson: string;
     enabled: boolean;
     pollIntervalSeconds: number;
+    maintenanceEnabled?: boolean;
+    maintenanceStartAt?: string | null;
+    maintenanceEndAt?: string | null;
+    maintenanceMessage?: string;
   }) =>
     fetchJson<IntegrationConnector>("/api/v1/admin/connectors", {
       method: "POST",
@@ -163,7 +167,21 @@ export const api = {
     }),
   updateConnector: (
     id: string,
-    body: Partial<Pick<IntegrationConnector, "type" | "name" | "configJson" | "authJson" | "enabled" | "pollIntervalSeconds">>
+    body: Partial<
+      Pick<
+        IntegrationConnector,
+        | "type"
+        | "name"
+        | "configJson"
+        | "authJson"
+        | "enabled"
+        | "pollIntervalSeconds"
+        | "maintenanceEnabled"
+        | "maintenanceStartAt"
+        | "maintenanceEndAt"
+        | "maintenanceMessage"
+      >
+    >
   ) =>
     fetchJson<IntegrationConnector | null>(`/api/v1/admin/connectors/${id}`, {
       method: "PATCH",

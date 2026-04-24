@@ -722,10 +722,93 @@ textarea:focus {
   margin-top: 4px;
 }
 
+.connector-maintenance-state {
+  margin-top: 4px;
+}
+
+.connector-maintenance-active {
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.connector-maintenance-scheduled {
+  color: color-mix(in srgb, var(--blue) 78%, var(--text));
+}
+
+.connector-maintenance-expired {
+  color: var(--amber);
+}
+
 .cachet-row-actions {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
+}
+
+.cachet-table-tools {
+  padding: 12px 15px;
+  background: var(--surface-muted);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.cachet-table-tools label {
+  display: block;
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cachet-table-tools input {
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  margin-top: 5px;
+  padding: 6px 12px;
+  color: var(--text);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+}
+
+.cachet-expander {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.cachet-expander span {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 999px;
+  font-weight: 800;
+}
+
+.cachet-nested-row {
+  margin-left: 24px;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+}
+
+.maintenance-source {
+  margin-top: 4px;
+  font-weight: 700;
+}
+
+.cachet-maintenance-explainer,
+.cachet-maintenance-summary {
+  color: var(--muted-strong);
 }
 
 .cachet-stat-list {

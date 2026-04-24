@@ -27,7 +27,7 @@ import { nowIso, slugify } from "../utils.js";
 import { buildSeedState, type SeedState } from "./seed.js";
 import { runMigrations } from "./migrations.js";
 import { mergeSummaryStatus, serviceStatusEventsFromSnapshot, severityTrend, splitUtcIntervalByDay, utcDayKey, worstStatus } from "./utils.js";
-import type { StatusRepository } from "./types.js";
+import type { ConnectorCreateInput, StatusRepository } from "./types.js";
 
 type RawRow = Record<string, unknown>;
 
@@ -112,6 +112,10 @@ function mapConnector(row: RawRow): IntegrationConnector {
     authJson: jsonText(row.auth_json),
     enabled: toBoolean(row.enabled),
     pollIntervalSeconds: Number(row.poll_interval_seconds ?? 300),
+    maintenanceEnabled: toBoolean(row.maintenance_enabled),
+    maintenanceStartAt: row.maintenance_start_at ? new Date(String(row.maintenance_start_at)).toISOString() : null,
+    maintenanceEndAt: row.maintenance_end_at ? new Date(String(row.maintenance_end_at)).toISOString() : null,
+    maintenanceMessage: String(row.maintenance_message ?? ""),
     lastSuccessAt: row.last_success_at ? new Date(String(row.last_success_at)).toISOString() : null,
     lastErrorAt: row.last_error_at ? new Date(String(row.last_error_at)).toISOString() : null,
     lastErrorMessage: typeof row.last_error_message === "string" && row.last_error_message ? row.last_error_message : null
@@ -845,20 +849,21 @@ export class PostgresStore implements StatusRepository {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async createConnector(
-    tenantId: string,
-    input: Omit<IntegrationConnector, "id" | "tenantId" | "lastSuccessAt" | "lastErrorAt" | "lastErrorMessage">
-  ): Promise<IntegrationConnector> {
+  async createConnector(tenantId: string, input: ConnectorCreateInput): Promise<IntegrationConnector> {
     const connector: IntegrationConnector = {
       ...input,
       id: `connector-${slugify(input.name)}-${Date.now()}`,
       tenantId,
+      maintenanceEnabled: input.maintenanceEnabled ?? false,
+      maintenanceStartAt: input.maintenanceStartAt ?? null,
+      maintenanceEndAt: input.maintenanceEndAt ?? null,
+      maintenanceMessage: input.maintenanceMessage ?? "",
       lastSuccessAt: null,
       lastErrorAt: null,
       lastErrorMessage: null
     };
     await this.pool.query(
-      "INSERT INTO connectors (id, tenant_id, type, name, config_json, auth_json, enabled, poll_interval_seconds, last_success_at, last_error_at, last_error_message) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10,$11)",
+      "INSERT INTO connectors (id, tenant_id, type, name, config_json, auth_json, enabled, poll_interval_seconds, maintenance_enabled, maintenance_start_at, maintenance_end_at, maintenance_message, last_success_at, last_error_at, last_error_message) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
       [
         connector.id,
         tenantId,
@@ -868,6 +873,10 @@ export class PostgresStore implements StatusRepository {
         connector.authJson,
         connector.enabled,
         connector.pollIntervalSeconds,
+        connector.maintenanceEnabled,
+        connector.maintenanceStartAt,
+        connector.maintenanceEndAt,
+        connector.maintenanceMessage,
         connector.lastSuccessAt,
         connector.lastErrorAt,
         connector.lastErrorMessage
@@ -885,7 +894,7 @@ export class PostgresStore implements StatusRepository {
     }
     const next = { ...current, ...patch };
     await this.pool.query(
-      "UPDATE connectors SET type = $1, name = $2, config_json = $3::jsonb, auth_json = $4::jsonb, enabled = $5, poll_interval_seconds = $6, last_success_at = $7, last_error_at = $8, last_error_message = $9 WHERE id = $10",
+      "UPDATE connectors SET type = $1, name = $2, config_json = $3::jsonb, auth_json = $4::jsonb, enabled = $5, poll_interval_seconds = $6, maintenance_enabled = $7, maintenance_start_at = $8, maintenance_end_at = $9, maintenance_message = $10, last_success_at = $11, last_error_at = $12, last_error_message = $13 WHERE id = $14",
       [
         next.type,
         next.name,
@@ -893,6 +902,10 @@ export class PostgresStore implements StatusRepository {
         jsonText(next.authJson),
         next.enabled,
         next.pollIntervalSeconds,
+        next.maintenanceEnabled,
+        next.maintenanceStartAt,
+        next.maintenanceEndAt,
+        next.maintenanceMessage,
         next.lastSuccessAt,
         next.lastErrorAt,
         next.lastErrorMessage,
@@ -1320,7 +1333,7 @@ export class PostgresStore implements StatusRepository {
 
       for (const connector of seed.connectors) {
         await client.query(
-          "INSERT INTO connectors (id, tenant_id, type, name, config_json, auth_json, enabled, poll_interval_seconds, last_success_at, last_error_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10)",
+          "INSERT INTO connectors (id, tenant_id, type, name, config_json, auth_json, enabled, poll_interval_seconds, maintenance_enabled, maintenance_start_at, maintenance_end_at, maintenance_message, last_success_at, last_error_at, last_error_message) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
           [
             connector.id,
             connector.tenantId,
@@ -1330,8 +1343,13 @@ export class PostgresStore implements StatusRepository {
             connector.authJson,
             connector.enabled,
             connector.pollIntervalSeconds,
+            connector.maintenanceEnabled,
+            connector.maintenanceStartAt,
+            connector.maintenanceEndAt,
+            connector.maintenanceMessage,
             connector.lastSuccessAt,
-            connector.lastErrorAt
+            connector.lastErrorAt,
+            connector.lastErrorMessage
           ]
         );
       }

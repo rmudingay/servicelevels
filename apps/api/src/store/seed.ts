@@ -157,6 +157,10 @@ export function buildSeedState(config: AppConfig): SeedState {
       authJson: JSON.stringify({ kind: "demo" }, null, 2),
       enabled: true,
       pollIntervalSeconds: 300,
+      maintenanceEnabled: false,
+      maintenanceStartAt: null,
+      maintenanceEndAt: null,
+      maintenanceMessage: "",
       lastSuccessAt: null,
       lastErrorAt: null,
       lastErrorMessage: null
@@ -180,6 +184,10 @@ export function buildSeedState(config: AppConfig): SeedState {
       authJson: JSON.stringify({ kind: "demo" }, null, 2),
       enabled: true,
       pollIntervalSeconds: 300,
+      maintenanceEnabled: false,
+      maintenanceStartAt: null,
+      maintenanceEndAt: null,
+      maintenanceMessage: "",
       lastSuccessAt: null,
       lastErrorAt: null,
       lastErrorMessage: null
@@ -203,6 +211,10 @@ export function buildSeedState(config: AppConfig): SeedState {
       authJson: JSON.stringify({ kind: "demo" }, null, 2),
       enabled: true,
       pollIntervalSeconds: 300,
+      maintenanceEnabled: true,
+      maintenanceStartAt: nowIso(),
+      maintenanceEndAt: null,
+      maintenanceMessage: "Network monitoring is in a planned maintenance interval.",
       lastSuccessAt: null,
       lastErrorAt: null,
       lastErrorMessage: null

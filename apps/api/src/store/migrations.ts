@@ -52,6 +52,10 @@ export const migrations: Migration[] = [
         auth_json jsonb NOT NULL DEFAULT '{}'::jsonb,
         enabled boolean NOT NULL DEFAULT true,
         poll_interval_seconds integer NOT NULL DEFAULT 300,
+        maintenance_enabled boolean NOT NULL DEFAULT false,
+        maintenance_start_at timestamptz NULL,
+        maintenance_end_at timestamptz NULL,
+        maintenance_message text NOT NULL DEFAULT '',
         last_success_at timestamptz NULL,
         last_error_at timestamptz NULL,
         last_error_message text NULL
@@ -199,6 +203,15 @@ export const migrations: Migration[] = [
         source_ref text NOT NULL DEFAULT ''
       )`,
       `CREATE INDEX IF NOT EXISTS idx_service_status_events_tenant_service_collected ON service_status_events (tenant_id, service_id, collected_at DESC)`
+    ]
+  },
+  {
+    id: "007_connector_maintenance",
+    statements: [
+      `ALTER TABLE connectors ADD COLUMN IF NOT EXISTS maintenance_enabled boolean NOT NULL DEFAULT false`,
+      `ALTER TABLE connectors ADD COLUMN IF NOT EXISTS maintenance_start_at timestamptz NULL`,
+      `ALTER TABLE connectors ADD COLUMN IF NOT EXISTS maintenance_end_at timestamptz NULL`,
+      `ALTER TABLE connectors ADD COLUMN IF NOT EXISTS maintenance_message text NOT NULL DEFAULT ''`
     ]
   }
 ];

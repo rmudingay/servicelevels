@@ -554,10 +554,16 @@ test("admin CRUD routes manage services, connectors, tabs, banners, subscription
       },
       payload: {
         name: "Ops Webhook Updated",
-        enabled: false
+        enabled: false,
+        maintenanceEnabled: true,
+        maintenanceStartAt: "2026-04-20T11:00:00.000Z",
+        maintenanceEndAt: "2026-04-20T12:00:00.000Z",
+        maintenanceMessage: "Ops webhook is paused for maintenance."
       }
     });
     assert.equal(connectorPatch.statusCode, 200);
+    assert.equal((connectorPatch.json() as { maintenanceEnabled: boolean }).maintenanceEnabled, true);
+    assert.equal((connectorPatch.json() as { maintenanceMessage: string }).maintenanceMessage, "Ops webhook is paused for maintenance.");
 
     const connectorList = await app.inject({
       method: "GET",

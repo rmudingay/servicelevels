@@ -19,6 +19,20 @@ import type {
   IntegrationConnector
 } from "@service-levels/shared";
 
+export type ConnectorCreateInput = Omit<
+  IntegrationConnector,
+  | "id"
+  | "tenantId"
+  | "maintenanceEnabled"
+  | "maintenanceStartAt"
+  | "maintenanceEndAt"
+  | "maintenanceMessage"
+  | "lastSuccessAt"
+  | "lastErrorAt"
+  | "lastErrorMessage"
+> &
+  Partial<Pick<IntegrationConnector, "maintenanceEnabled" | "maintenanceStartAt" | "maintenanceEndAt" | "maintenanceMessage">>;
+
 export interface StatusRepository {
   getMeta(): Promise<AppMeta>;
   getBranding(): Promise<Branding>;
@@ -57,7 +71,7 @@ export interface StatusRepository {
   deleteTenant(tenantId: string): Promise<boolean>;
   createSubscription(tenantId: string, input: Omit<NotificationSubscription, "id" | "tenantId">): Promise<NotificationSubscription>;
   deleteSubscription(subscriptionId: string): Promise<boolean>;
-  createConnector(tenantId: string, input: Omit<IntegrationConnector, "id" | "tenantId" | "lastSuccessAt" | "lastErrorAt" | "lastErrorMessage">): Promise<IntegrationConnector>;
+  createConnector(tenantId: string, input: ConnectorCreateInput): Promise<IntegrationConnector>;
   updateConnector(connectorId: string, patch: Partial<IntegrationConnector>): Promise<IntegrationConnector | null>;
   deleteConnector(connectorId: string): Promise<boolean>;
   createBanner(

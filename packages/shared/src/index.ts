@@ -53,6 +53,10 @@ export interface IntegrationConnector {
   authJson: string;
   enabled: boolean;
   pollIntervalSeconds: number;
+  maintenanceEnabled: boolean;
+  maintenanceStartAt: string | null;
+  maintenanceEndAt: string | null;
+  maintenanceMessage: string;
   lastSuccessAt: string | null;
   lastErrorAt: string | null;
   lastErrorMessage: string | null;

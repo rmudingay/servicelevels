@@ -24,6 +24,7 @@ import { nowIso, slugify, worstStatus } from "../utils.js";
 import { clonePlatformSettings, platformSettingsFromConfig } from "../settings.js";
 import { mergeSummaryStatus, serviceStatusEventsFromSnapshot, severityTrend, splitUtcIntervalByDay, utcDayKey } from "./utils.js";
 import type { AppConfig } from "../config.js";
+import type { ConnectorCreateInput } from "./types.js";
 
 type InternalState = {
   meta: AppMeta;
@@ -742,14 +743,15 @@ export class MemoryStore {
     return this.state.subscriptions.length !== before;
   }
 
-  async createConnector(
-    tenantId: string,
-    input: Omit<IntegrationConnector, "id" | "tenantId" | "lastSuccessAt" | "lastErrorAt" | "lastErrorMessage">
-  ): Promise<IntegrationConnector> {
+  async createConnector(tenantId: string, input: ConnectorCreateInput): Promise<IntegrationConnector> {
     const connector: IntegrationConnector = {
       ...input,
       id: `connector-${slugify(input.name)}-${Date.now()}`,
       tenantId,
+      maintenanceEnabled: input.maintenanceEnabled ?? false,
+      maintenanceStartAt: input.maintenanceStartAt ?? null,
+      maintenanceEndAt: input.maintenanceEndAt ?? null,
+      maintenanceMessage: input.maintenanceMessage ?? "",
       lastSuccessAt: null,
       lastErrorAt: null,
       lastErrorMessage: null

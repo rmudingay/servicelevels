@@ -110,6 +110,20 @@ function computeNextDueAt(lastSuccessAt: string | null, lastErrorAt: string | nu
   return due.toISOString();
 }
 
+function normalizeOptionalDate(value: unknown): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || value === "") {
+    return null;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 function normalizeJsonPayload(value: unknown, fieldName: string, fallback: string): { value: string } | { error: string } {
   const candidate = value === undefined ? fallback : value;
   if (typeof candidate === "string") {
@@ -654,6 +668,10 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
       authJson?: string;
       enabled?: boolean;
       pollIntervalSeconds?: number;
+      maintenanceEnabled?: boolean;
+      maintenanceStartAt?: string | null;
+      maintenanceEndAt?: string | null;
+      maintenanceMessage?: string;
     };
     const tenants = await store.getTenants();
     const tenant = body.tenantSlug ? tenants.find((entry) => entry.slug === body.tenantSlug) : tenants[0];
@@ -677,7 +695,11 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
       configJson: configJson.value,
       authJson: authJson.value,
       enabled: body.enabled ?? true,
-      pollIntervalSeconds: body.pollIntervalSeconds ?? 300
+      pollIntervalSeconds: body.pollIntervalSeconds ?? 300,
+      maintenanceEnabled: body.maintenanceEnabled ?? false,
+      maintenanceStartAt: normalizeOptionalDate(body.maintenanceStartAt) ?? null,
+      maintenanceEndAt: normalizeOptionalDate(body.maintenanceEndAt) ?? null,
+      maintenanceMessage: body.maintenanceMessage?.trim() ?? ""
     });
     reply.code(201).send(connector);
   });
@@ -691,8 +713,21 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
       authJson: string;
       enabled: boolean;
       pollIntervalSeconds: number;
+      maintenanceEnabled: boolean;
+      maintenanceStartAt: string | null;
+      maintenanceEndAt: string | null;
+      maintenanceMessage: string;
     }>;
     const patch: Partial<IntegrationConnector> = { ...body };
+    if (body.maintenanceStartAt !== undefined) {
+      patch.maintenanceStartAt = normalizeOptionalDate(body.maintenanceStartAt) ?? null;
+    }
+    if (body.maintenanceEndAt !== undefined) {
+      patch.maintenanceEndAt = normalizeOptionalDate(body.maintenanceEndAt) ?? null;
+    }
+    if (body.maintenanceMessage !== undefined) {
+      patch.maintenanceMessage = body.maintenanceMessage.trim();
+    }
     if (body.configJson !== undefined) {
       const configJson = normalizeJsonPayload(body.configJson, "Config JSON", "{}");
       if ("error" in configJson) {

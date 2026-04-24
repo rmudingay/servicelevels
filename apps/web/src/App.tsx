@@ -621,6 +621,7 @@ export function StatusPage() {
     };
   });
   const noticeBanners = status.banners.filter((banner) => banner.active && (!currentTenant || banner.tenantId === currentTenant.id));
+  const visibleMaintenance = status.maintenance.filter((entry) => entry.status !== "resolved");
   const incidentGroups = status.incidents.reduce<Record<string, Incident[]>>((groups, incident) => {
     const day = incident.openedAt.slice(0, 10);
     groups[day] = [...(groups[day] ?? []), incident];
@@ -722,18 +723,26 @@ export function StatusPage() {
                 <strong>Maintenance</strong>
               </div>
               <div className="list-group">
-                {status.maintenance.length === 0 ? (
+                {visibleMaintenance.length === 0 ? (
                   <div className="list-group-item">No active maintenance windows for this view.</div>
                 ) : (
-                  status.maintenance.map((entry) => (
-                    <div key={entry.id} className="list-group-item">
-                      <strong>{entry.title}</strong>{" "}
-                      <small className="date">{new Date(entry.startsAt).toLocaleString()}</small>
-                      <div className="markdown-body">
-                        <p>{entry.description}</p>
+                  visibleMaintenance.map((entry) => {
+                    const explanation = maintenanceExplanation(entry, status);
+                    return (
+                      <div key={entry.id} className="list-group-item">
+                        <strong>{entry.title}</strong>{" "}
+                        <small className="date">{new Date(entry.startsAt).toLocaleString()}</small>
+                        <div className="cachet-row-meta maintenance-source">Source: {explanation.source}</div>
+                        <div className="markdown-body">
+                          <p>{entry.description}</p>
+                          <p className="cachet-maintenance-explainer">{explanation.detail}</p>
+                          {explanation.currentSummary && explanation.currentSummary !== entry.description && (
+                            <p className="cachet-maintenance-summary">Latest service summary: {explanation.currentSummary}</p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -812,6 +821,7 @@ type AdminModal =
   | "auth-settings"
   | "slack-settings"
   | "smtp-settings"
+  | "connector-maintenance"
   | null;
 
 const adminSections: Array<{ id: AdminSection; label: string }> = [
@@ -917,6 +927,74 @@ function connectorHelp(type: IntegrationConnector["type"]): { nameHelp: string; 
   };
 }
 
+function dateTimeInputValue(value: string | null): string {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function dateTimeInputToIso(value: string): string | null {
+  if (!value.trim()) {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function connectorMaintenanceState(connector: IntegrationConnector, now = new Date()): "off" | "scheduled" | "active" | "expired" {
+  if (!connector.maintenanceEnabled) {
+    return "off";
+  }
+  const nowMs = now.getTime();
+  const startsAtMs = connector.maintenanceStartAt ? Date.parse(connector.maintenanceStartAt) : Number.NEGATIVE_INFINITY;
+  const endsAtMs = connector.maintenanceEndAt ? Date.parse(connector.maintenanceEndAt) : Number.POSITIVE_INFINITY;
+  if (nowMs < startsAtMs) {
+    return "scheduled";
+  }
+  if (nowMs > endsAtMs) {
+    return "expired";
+  }
+  return "active";
+}
+
+function connectorMaintenanceLabel(connector: IntegrationConnector): string {
+  const state = connectorMaintenanceState(connector);
+  if (state === "off") {
+    return "maintenance disabled";
+  }
+  const parts = [`maintenance ${state}`];
+  if (connector.maintenanceStartAt) {
+    parts.push(`starts ${formatDateTime(connector.maintenanceStartAt)}`);
+  }
+  if (connector.maintenanceEndAt) {
+    parts.push(`ends ${formatDateTime(connector.maintenanceEndAt)}`);
+  }
+  return parts.join(" · ");
+}
+
+function maintenanceExplanation(entry: MaintenanceWindow, view: StatusView): { source: string; detail: string; currentSummary?: string } {
+  const service = view.services.find((candidate) => candidate.id === entry.serviceId);
+  const snapshotService = view.snapshot?.services.find((candidate) => candidate.serviceId === entry.serviceId);
+  if (entry.createdBy === "system" && entry.description.includes("entered maintenance based on collected status")) {
+    return {
+      source: "Collected status",
+      detail: `The worker opened this automatically because the latest ${service?.sourceType ?? "monitoring"} result for ${service?.name ?? "this service"} normalized to Maintenance.`,
+      currentSummary: snapshotService?.summary
+    };
+  }
+  return {
+    source: "Planned interval",
+    detail: `This is a scheduled maintenance window${service ? ` for ${service.name}` : ""}. It remains visible until it is resolved or the window is no longer active.`,
+    currentSummary: snapshotService?.summary
+  };
+}
+
 export function AdminPage() {
   const [theme, setThemeMode] = useThemeMode("dark");
   const [status, setStatus] = useState<StatusView | null>(null);
@@ -973,6 +1051,8 @@ export function AdminPage() {
   const [tenantSlug, setTenantSlug] = useState<string>("primary-site");
   const [activeAdminSection, setActiveAdminSection] = useState<AdminSection>("overview");
   const [adminModal, setAdminModal] = useState<AdminModal>(null);
+  const [tabsExpanded, setTabsExpanded] = useState(true);
+  const [connectorSearch, setConnectorSearch] = useState("");
   const [tenantForm, setTenantForm] = useState({
     name: "",
     slug: "",
@@ -1022,6 +1102,12 @@ export function AdminPage() {
     enabled: true,
     pollIntervalSeconds: connectorTemplate("zabbix").pollIntervalSeconds
   });
+  const [connectorMaintenanceForm, setConnectorMaintenanceForm] = useState({
+    enabled: false,
+    startAt: "",
+    endAt: "",
+    message: ""
+  });
   const [subscriptionForm, setSubscriptionForm] = useState({
     serviceId: "",
     channelType: "slack" as "slack" | "email",
@@ -1029,6 +1115,7 @@ export function AdminPage() {
     enabled: true
   });
   const [editingConnectorId, setEditingConnectorId] = useState<string | null>(null);
+  const [editingConnectorMaintenanceId, setEditingConnectorMaintenanceId] = useState<string | null>(null);
 
   async function refresh(
     currentSession: { user: unknown; meta: AppMeta & { adminAuthModes: AuthMode[] } } | null = me,
@@ -1358,8 +1445,16 @@ export function AdminPage() {
   }
 
   async function handleBannerToggle(id: string): Promise<void> {
-    await api.toggleBanner(id);
-    setMessage("Banner visibility updated.");
+    const updated = await api.toggleBanner(id);
+    setStatus((current) =>
+      current
+        ? {
+            ...current,
+            banners: current.banners.map((banner) => (banner.id === updated.id ? updated : banner))
+          }
+        : current
+    );
+    setMessage(updated.active ? "Banner published." : "Banner unpublished.");
     await refresh();
   }
 
@@ -1480,6 +1575,22 @@ export function AdminPage() {
   const connectorFormHelp = connectorHelp(connectorForm.type);
   const activeBanners = status?.banners.filter((banner) => banner.active) ?? [];
   const inactiveBanners = status?.banners.filter((banner) => !banner.active) ?? [];
+  const connectorSearchValue = connectorSearch.trim().toLowerCase();
+  const filteredConnectors = connectorSearchValue
+    ? connectors.filter((connector) =>
+        [
+          connector.name,
+          connector.type,
+          connector.enabled ? "enabled" : "disabled",
+          connector.lastErrorMessage ?? "",
+          connector.maintenanceMessage,
+          connectorMaintenanceLabel(connector)
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(connectorSearchValue)
+      )
+    : connectors;
 
   function resetConnectorForm(): void {
     const template = connectorTemplate("zabbix");
@@ -1557,6 +1668,35 @@ export function AdminPage() {
     setAdminModal("connector");
   }
 
+  function handleConnectorMaintenanceEdit(connector: IntegrationConnector): void {
+    setConnectorMaintenanceForm({
+      enabled: connector.maintenanceEnabled,
+      startAt: dateTimeInputValue(connector.maintenanceStartAt),
+      endAt: dateTimeInputValue(connector.maintenanceEndAt),
+      message: connector.maintenanceMessage
+    });
+    setEditingConnectorMaintenanceId(connector.id);
+    setActiveAdminSection("connectors");
+    setAdminModal("connector-maintenance");
+  }
+
+  async function handleConnectorMaintenanceSave(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!editingConnectorMaintenanceId) {
+      return;
+    }
+    await api.updateConnector(editingConnectorMaintenanceId, {
+      maintenanceEnabled: connectorMaintenanceForm.enabled,
+      maintenanceStartAt: dateTimeInputToIso(connectorMaintenanceForm.startAt),
+      maintenanceEndAt: dateTimeInputToIso(connectorMaintenanceForm.endAt),
+      maintenanceMessage: connectorMaintenanceForm.message
+    });
+    setMessage("Connector maintenance settings updated.");
+    setEditingConnectorMaintenanceId(null);
+    setAdminModal(null);
+    await refresh();
+  }
+
   function closeAdminModal(): void {
     setAdminModal(null);
     setEditingTenantId(null);
@@ -1565,6 +1705,8 @@ export function AdminPage() {
     setEditingBannerId(null);
     setBannerForm({ scopeType: "tenant", scopeRef: tenantSlug, title: "", message: "", severity: "maintenance" });
     resetConnectorForm();
+    setEditingConnectorMaintenanceId(null);
+    setConnectorMaintenanceForm({ enabled: false, startAt: "", endAt: "", message: "" });
     setEditingTabId(null);
     setTabForm({ title: "", filterQuery: "", isGlobal: false, enabled: true });
   }
@@ -1881,13 +2023,25 @@ export function AdminPage() {
                       Create connector
                     </button>
                   </div>
+                  <div className="cachet-table-tools">
+                    <label>
+                      Search connectors
+                      <input value={connectorSearch} onChange={(event) => setConnectorSearch(event.target.value)} placeholder="Filter by name, type, state, error, or maintenance" />
+                    </label>
+                  </div>
                   <div className="list-group">
-                    {connectors.map((connector) => (
+                    {filteredConnectors.length === 0 ? (
+                      <div className="list-group-item">No connectors match this search.</div>
+                    ) : (
+                      filteredConnectors.map((connector) => (
                       <div key={connector.id} className="list-group-item">
                         <strong>{connector.name}</strong> <span className="cachet-row-meta">{connector.type} · {connector.type === "webhook" ? "inbound" : `every ${connector.pollIntervalSeconds}s`}</span>
                         <div className="pull-right cachet-row-actions">
                           <button className="btn btn-link" type="button" onClick={() => void handleConnectorEdit(connector)}>
                             Edit
+                          </button>
+                          <button className="btn btn-link" type="button" onClick={() => handleConnectorMaintenanceEdit(connector)}>
+                            Maintenance
                           </button>
                           <button className="btn btn-link" type="button" onClick={() => void handleConnectorDelete(connector.id)}>
                             Delete
@@ -1897,9 +2051,14 @@ export function AdminPage() {
                           {connector.enabled ? "enabled" : "disabled"} ·{" "}
                           {connector.lastSuccessAt ? `last success ${new Date(connector.lastSuccessAt).toLocaleString()}` : connector.lastErrorAt ? `last error ${new Date(connector.lastErrorAt).toLocaleString()}` : "not collected"}
                         </div>
+                        <div className={`cachet-row-meta connector-maintenance-state connector-maintenance-${connectorMaintenanceState(connector)}`}>
+                          {connectorMaintenanceLabel(connector)}
+                          {connector.maintenanceMessage ? ` · ${connector.maintenanceMessage}` : ""}
+                        </div>
                         {connector.lastErrorMessage && <div className="cachet-row-meta connector-error-message">{connector.lastErrorMessage}</div>}
                       </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </div>
               </div>
@@ -2170,7 +2329,10 @@ export function AdminPage() {
                       <div className="cachet-row-meta">{branding.appName || adminMeta.appName}</div>
                     </div>
                     <div className="list-group-item">
-                      <strong>Tabs</strong>
+                      <button className="cachet-expander" type="button" aria-expanded={tabsExpanded} onClick={() => setTabsExpanded((current) => !current)}>
+                        <span aria-hidden="true">{tabsExpanded ? "-" : "+"}</span>
+                        <strong>Tabs</strong>
+                      </button>
                       <div className="pull-right">
                         <button className="btn btn-link" type="button" onClick={openTabCreate}>
                           Create tab
@@ -2180,27 +2342,28 @@ export function AdminPage() {
                         Tabs organize status rows using filter queries. Example: category:infrastructure tag:network
                       </div>
                     </div>
-                    {tabs.length === 0 ? (
-                      <div className="list-group-item">No tabs configured.</div>
-                    ) : (
-                      tabs.map((tab) => (
-                        <div key={tab.id} className="list-group-item">
-                          <strong>{tab.title}</strong>{" "}
-                          <span className="cachet-row-meta">
-                            {tab.isGlobal ? "global" : "tenant"} · {tab.enabled ? "enabled" : "disabled"}
-                          </span>
-                          <div className="pull-right cachet-row-actions">
-                            <button className="btn btn-link" type="button" onClick={() => handleTabEdit(tab)}>
-                              Edit
-                            </button>
-                            <button className="btn btn-link" type="button" disabled={tabs.length <= 1} onClick={() => void handleTabDelete(tab)}>
-                              Delete
-                            </button>
+                    {tabsExpanded &&
+                      (tabs.length === 0 ? (
+                        <div className="list-group-item cachet-nested-row">No tabs configured.</div>
+                      ) : (
+                        tabs.map((tab) => (
+                          <div key={tab.id} className="list-group-item cachet-nested-row">
+                            <strong>{tab.title}</strong>{" "}
+                            <span className="cachet-row-meta">
+                              {tab.isGlobal ? "global" : "tenant"} · {tab.enabled ? "enabled" : "disabled"}
+                            </span>
+                            <div className="pull-right cachet-row-actions">
+                              <button className="btn btn-link" type="button" onClick={() => handleTabEdit(tab)}>
+                                Edit
+                              </button>
+                              <button className="btn btn-link" type="button" disabled={tabs.length <= 1} onClick={() => void handleTabDelete(tab)}>
+                                Delete
+                              </button>
+                            </div>
+                            <div className="cachet-row-meta">Filter: {tab.filterQuery || "all services"}</div>
                           </div>
-                          <div className="cachet-row-meta">Filter: {tab.filterQuery || "all services"}</div>
-                        </div>
-                      ))
-                    )}
+                        ))
+                      ))}
                     <div className="list-group-item">
                       <strong>Status colors</strong>
                       <div className="pull-right">
@@ -2341,6 +2504,52 @@ export function AdminPage() {
             </label>
             <button className="btn btn-success" type="submit">
               {editingConnectorId ? "Save connector" : "Create connector"}
+            </button>
+          </form>
+        </ModalFrame>
+      )}
+
+      {adminModal === "connector-maintenance" && (
+        <ModalFrame title="Connector maintenance" description="Pause connector-driven status changes during a planned interval and show the message on affected services." onClose={closeAdminModal}>
+          <form className="cachet-form" onSubmit={handleConnectorMaintenanceSave}>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={connectorMaintenanceForm.enabled}
+                onChange={(event) => setConnectorMaintenanceForm((current) => ({ ...current, enabled: event.target.checked }))}
+              />
+              Enable maintenance interval
+            </label>
+            <div className="cachet-form-grid">
+              <label>
+                Start time
+                <input
+                  type="datetime-local"
+                  value={connectorMaintenanceForm.startAt}
+                  onChange={(event) => setConnectorMaintenanceForm((current) => ({ ...current, startAt: event.target.value }))}
+                />
+              </label>
+              <label>
+                End time
+                <input
+                  type="datetime-local"
+                  value={connectorMaintenanceForm.endAt}
+                  onChange={(event) => setConnectorMaintenanceForm((current) => ({ ...current, endAt: event.target.value }))}
+                />
+              </label>
+            </div>
+            <label>
+              Optional message
+              <textarea
+                rows={4}
+                value={connectorMaintenanceForm.message}
+                onChange={(event) => setConnectorMaintenanceForm((current) => ({ ...current, message: event.target.value }))}
+                placeholder="Example: Network monitoring is in a planned maintenance interval."
+              />
+              <span className="field-help">When active, services owned by this connector are marked as Maintenance and this message appears as the service summary.</span>
+            </label>
+            <button className="btn btn-success" type="submit">
+              Save maintenance
             </button>
           </form>
         </ModalFrame>

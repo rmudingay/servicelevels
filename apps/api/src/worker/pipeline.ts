@@ -23,6 +23,20 @@ type TenantCycle = {
   changed: boolean;
 };
 
+function connectorMaintenanceIsActive(connector: IntegrationConnector, now: string): boolean {
+  if (!connector.maintenanceEnabled) {
+    return false;
+  }
+  const nowMs = Date.parse(now);
+  const startsAtMs = connector.maintenanceStartAt ? Date.parse(connector.maintenanceStartAt) : Number.NEGATIVE_INFINITY;
+  const endsAtMs = connector.maintenanceEndAt ? Date.parse(connector.maintenanceEndAt) : Number.POSITIVE_INFINITY;
+  return nowMs >= startsAtMs && nowMs <= endsAtMs;
+}
+
+function connectorMaintenanceMessage(connector: IntegrationConnector): string {
+  return connector.maintenanceMessage.trim() || `${connector.name} is in a planned maintenance interval.`;
+}
+
 function fingerprintSnapshot(snapshot: Snapshot): string {
   return JSON.stringify({
     overallStatus: snapshot.overallStatus,
@@ -56,12 +70,33 @@ export async function collectTenantCycle(repo: StatusRepository, tenant: Tenant)
 
   for (const connector of enabledConnectors) {
     const scopedServices = services.filter((service) => service.sourceType === connector.type && service.enabled);
+    const cycleNow = nowIso();
     if (scopedServices.length === 0) {
       connectorRuns.push({
         connector,
         status: "success",
-        touchedAt: nowIso()
+        touchedAt: cycleNow
       });
+      continue;
+    }
+
+    if (connectorMaintenanceIsActive(connector, cycleNow)) {
+      connectorRuns.push({
+        connector,
+        status: "success",
+        touchedAt: cycleNow
+      });
+      serviceResults.push(
+        ...scopedServices.map((service) => ({
+          serviceId: service.id,
+          status: "maintenance" as const,
+          summary: connectorMaintenanceMessage(connector),
+          lastCheckedAt: cycleNow,
+          sourceConnectorId: connector.id,
+          sourceConnectorType: connector.type,
+          bannerIds: banners.filter((banner) => bannerMatchesService(banner, tenant, tabs, service)).map((banner) => banner.id)
+        }))
+      );
       continue;
     }
 
@@ -197,6 +232,50 @@ export async function ingestWebhookEvent(
     throw new Error("Webhook authentication failed");
   }
 
+  const collectedAt = nowIso();
+  if (connectorMaintenanceIsActive(connector, collectedAt)) {
+    const serviceResults = services
+      .filter((entry) => entry.enabled && entry.sourceType === connector.type)
+      .map((service) => ({
+        serviceId: service.id,
+        status: "maintenance" as const,
+        summary: connectorMaintenanceMessage(connector),
+        lastCheckedAt: collectedAt,
+        sourceConnectorId: connector.id,
+        sourceConnectorType: connector.type,
+        bannerIds: banners.filter((banner) => bannerMatchesService(banner, tenant, tabs, service)).map((banner) => banner.id)
+      }));
+
+    const overallStatus = serviceResults.length > 0 ? worstStatus(serviceResults.map((entry) => entry.status)) : "maintenance";
+    const snapshot: Snapshot = {
+      id: `snapshot-${tenant.id}-${Date.now()}`,
+      tenantId: tenant.id,
+      collectedAt,
+      overallStatus,
+      services: serviceResults
+        .map(({ sourceConnectorId, sourceConnectorType, bannerIds, ...rest }) => rest)
+        .sort((left, right) => left.serviceId.localeCompare(right.serviceId)),
+      rawPayload: {
+        generatedBy: "webhook",
+        source,
+        connectorId: connector.id,
+        overallStatus,
+        maintenance: true,
+        payload: payload as JsonObject
+      }
+    };
+
+    await repo.saveSnapshot(snapshot);
+    await processStatusEvents(await resolveEffectiveConfig(config, repo), repo, tenant, previousSnapshot, snapshot);
+    await repo.updateConnector(connector.id, { lastSuccessAt: collectedAt, lastErrorAt: null, lastErrorMessage: null });
+
+    return {
+      tenant,
+      connector,
+      snapshot
+    };
+  }
+
   const parsed = parseWebhookPayload(payload);
   const outcome = await collectWebhookConnector(
     {
@@ -212,7 +291,6 @@ export async function ingestWebhookEvent(
   );
 
   const matchedServiceIds = new Set(outcome.results.map((result) => result.serviceId));
-  const collectedAt = nowIso();
   const serviceResults = [...outcome.results];
 
   if (serviceResults.length === 0 && parsed.overallStatus) {

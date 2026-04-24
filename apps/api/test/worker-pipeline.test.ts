@@ -133,6 +133,35 @@ test("collectAndPersistTenant saves newly collected state for active connectors"
   }
 });
 
+test("collectTenantCycle marks connector-owned services as maintenance during connector maintenance", async () => {
+  const config = loadConfig({});
+  const store = new MemoryStore(config);
+  const tenant = (await store.getTenants())[0];
+  assert.ok(tenant);
+  const prometheusService = (await store.getServices(tenant.id)).find((entry) => entry.sourceType === "prometheus");
+  assert.ok(prometheusService);
+
+  await store.createConnector(tenant.id, {
+    type: "prometheus",
+    name: "Prometheus planned maintenance",
+    configJson: "{}",
+    authJson: "{}",
+    enabled: true,
+    pollIntervalSeconds: 300,
+    maintenanceEnabled: true,
+    maintenanceStartAt: "2000-01-01T00:00:00.000Z",
+    maintenanceEndAt: "2999-01-01T00:00:00.000Z",
+    maintenanceMessage: "Prometheus is paused during platform maintenance."
+  });
+
+  const cycle = await collectTenantCycle(store, tenant);
+  const serviceStatus = cycle.snapshot?.services.find((entry) => entry.serviceId === prometheusService.id);
+
+  assert.equal(cycle.connectorRuns[0]?.status, "success");
+  assert.equal(serviceStatus?.status, "maintenance");
+  assert.equal(serviceStatus?.summary, "Prometheus is paused during platform maintenance.");
+});
+
 test("ingestWebhookEvent applies overall status to all services when no service match is provided", async () => {
   const config = loadConfig({});
   const store = new MemoryStore(config);

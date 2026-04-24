@@ -12,7 +12,7 @@ async function createTestSchema(pool: Pool, config: ReturnType<typeof loadConfig
     "CREATE TABLE tenants (id text PRIMARY KEY, slug text, name text, description text, enabled boolean)",
     "CREATE TABLE tabs (id text PRIMARY KEY, tenant_id text, title text, slug text, sort_order integer, filter_query text, is_global boolean, enabled boolean)",
     "CREATE TABLE services (id text PRIMARY KEY, tenant_id text, name text, slug text, category text, topic text, tags jsonb, source_type text, source_ref text, enabled boolean)",
-    "CREATE TABLE connectors (id text PRIMARY KEY, tenant_id text, type text, name text, config_json jsonb, auth_json jsonb, enabled boolean, poll_interval_seconds integer, last_success_at timestamptz, last_error_at timestamptz, last_error_message text)",
+    "CREATE TABLE connectors (id text PRIMARY KEY, tenant_id text, type text, name text, config_json jsonb, auth_json jsonb, enabled boolean, poll_interval_seconds integer, maintenance_enabled boolean DEFAULT false, maintenance_start_at timestamptz, maintenance_end_at timestamptz, maintenance_message text DEFAULT '', last_success_at timestamptz, last_error_at timestamptz, last_error_message text)",
     "CREATE TABLE banners (id text PRIMARY KEY, tenant_id text, scope_type text, scope_ref text, title text, message text, severity text, starts_at timestamptz, ends_at timestamptz, updated_at timestamptz, severity_trend text, active boolean)",
     "CREATE TABLE incidents (id text PRIMARY KEY, tenant_id text, service_id text, title text, description text, status text, opened_at timestamptz, resolved_at timestamptz, source_type text)",
     "CREATE TABLE maintenance_windows (id text PRIMARY KEY, tenant_id text, service_id text, title text, description text, starts_at timestamptz, ends_at timestamptz, status text, created_by text)",
@@ -97,10 +97,16 @@ test("PostgresStore persists connectors, latest snapshots, and daily summaries",
 
     const updated = await reopened.updateConnector(connector.id, {
       lastSuccessAt: "2026-04-20T10:05:00.000Z",
+      maintenanceEnabled: true,
+      maintenanceStartAt: "2026-04-20T10:00:00.000Z",
+      maintenanceEndAt: "2026-04-20T11:00:00.000Z",
+      maintenanceMessage: "Planned connector maintenance",
       lastErrorMessage: null
     });
     assert.equal(updated?.configJson, "{\"sourceKey\":\"ops\"}");
     assert.equal(updated?.lastSuccessAt, "2026-04-20T10:05:00.000Z");
+    assert.equal(updated?.maintenanceEnabled, true);
+    assert.equal(updated?.maintenanceMessage, "Planned connector maintenance");
 
     const secondProcess = new PostgresStore(config, "postgres://test", new adapter.Pool() as unknown as Pool);
     await (secondProcess as PostgresStore & { loadState(): Promise<void> }).loadState();

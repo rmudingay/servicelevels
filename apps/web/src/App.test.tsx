@@ -227,6 +227,10 @@ function buildStatusView(): StatusView {
         authJson: "{}",
         enabled: true,
         pollIntervalSeconds: 300,
+        maintenanceEnabled: false,
+        maintenanceStartAt: null,
+        maintenanceEndAt: null,
+        maintenanceMessage: "",
         lastSuccessAt: "2026-04-20T09:55:00.000Z",
         lastErrorAt: null,
         lastErrorMessage: null
@@ -300,6 +304,17 @@ function buildStatusView(): StatusView {
         endsAt: null,
         status: "active",
         createdBy: "admin"
+      },
+      {
+        id: "maintenance-collected",
+        tenantId: "tenant-primary-site",
+        serviceId: "svc-prom",
+        title: "Metrics Pipeline maintenance",
+        description: "Metrics Pipeline entered maintenance based on collected status.",
+        startsAt: "2026-04-20T09:55:00.000Z",
+        endsAt: null,
+        status: "active",
+        createdBy: "system"
       }
     ],
     subscriptions: [
@@ -559,6 +574,8 @@ describe("status UI", () => {
     expect(screen.getByText("Past Incidents")).toBeInTheDocument();
     expect(screen.getByText("Some systems are experiencing issues")).toBeInTheDocument();
     expect(screen.getByText("Deploying Prometheus rules.")).toBeInTheDocument();
+    expect(screen.getByText("Source: Collected status")).toBeInTheDocument();
+    expect(screen.getByText(/latest prometheus result for Metrics Pipeline normalized to Maintenance/)).toBeInTheDocument();
     expect(screen.getAllByText("Core Router").length).toBeGreaterThan(0);
     expect(screen.getByText(/Investigating transient route instability/)).toBeInTheDocument();
     const coreRouterHistory = screen.getAllByLabelText("Core Router status history")[0];
@@ -927,6 +944,28 @@ describe("admin UI", () => {
 
     const connectorRow = screen.getByText("Prometheus cluster").closest(".list-group-item");
     expect(connectorRow).not.toBeNull();
+    fireEvent.change(screen.getByLabelText(/Search connectors/), { target: { value: "prometheus" } });
+    expect(screen.getByText("Prometheus cluster")).toBeInTheDocument();
+    fireEvent.click(within(connectorRow as HTMLElement).getByRole("button", { name: "Maintenance" }));
+    dialog = screen.getByRole("dialog");
+    connectorScope = within(dialog);
+    fireEvent.click(connectorScope.getByLabelText("Enable maintenance interval"));
+    fireEvent.change(connectorScope.getByLabelText("Start time"), { target: { value: "2026-04-20T11:00" } });
+    fireEvent.change(connectorScope.getByLabelText("End time"), { target: { value: "2026-04-20T12:00" } });
+    fireEvent.change(connectorScope.getByPlaceholderText("Example: Network monitoring is in a planned maintenance interval."), {
+      target: { value: "Prometheus is paused for planned maintenance." }
+    });
+    fireEvent.click(connectorScope.getByRole("button", { name: "Save maintenance" }));
+    await waitFor(() => {
+      expect(mockApi.updateConnector).toHaveBeenCalledWith(
+        "connector-prometheus",
+        expect.objectContaining({
+          maintenanceEnabled: true,
+          maintenanceMessage: "Prometheus is paused for planned maintenance."
+        })
+      );
+    });
+    fireEvent.change(screen.getByLabelText(/Search connectors/), { target: { value: "" } });
     fireEvent.click(within(connectorRow as HTMLElement).getByRole("button", { name: "Edit" }));
     dialog = screen.getByRole("dialog");
     connectorScope = within(dialog);
@@ -1052,6 +1091,14 @@ describe("admin UI", () => {
     await waitFor(() => {
       expect(mockApi.updateBranding).toHaveBeenCalledWith(expect.objectContaining({ appName: "Service Levels" }));
     });
+
+    const tabsRow = screen.getByText("Tabs").closest(".list-group-item");
+    expect(tabsRow).not.toBeNull();
+    const tabsToggle = within(tabsRow as HTMLElement).getByRole("button", { name: /Tabs/ });
+    fireEvent.click(tabsToggle);
+    expect(screen.queryByText("Network")).not.toBeInTheDocument();
+    fireEvent.click(tabsToggle);
+    expect(screen.getByText("Network")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Create tab" }));
     dialog = screen.getByRole("dialog");
