@@ -125,7 +125,7 @@ export async function collectTenantCycle(repo: StatusRepository, tenant: Tenant)
     banners,
     previousSnapshot,
     connectorRuns,
-    snapshot: changed ? snapshot : null,
+    snapshot,
     changed
   };
 }
@@ -133,7 +133,9 @@ export async function collectTenantCycle(repo: StatusRepository, tenant: Tenant)
 export async function persistTenantCycle(config: AppConfig, repo: StatusRepository, cycle: TenantCycle): Promise<void> {
   if (cycle.snapshot) {
     await repo.saveSnapshot(cycle.snapshot);
-    await processStatusEvents(await resolveEffectiveConfig(config, repo), repo, cycle.tenant, cycle.previousSnapshot, cycle.snapshot);
+    if (cycle.changed) {
+      await processStatusEvents(await resolveEffectiveConfig(config, repo), repo, cycle.tenant, cycle.previousSnapshot, cycle.snapshot);
+    }
   }
 
   const erroredConnectorIds = new Set(

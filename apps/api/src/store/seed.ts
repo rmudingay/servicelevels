@@ -121,6 +121,8 @@ export function buildSeedState(config: AppConfig): SeedState {
       severity: "maintenance",
       startsAt: null,
       endsAt: null,
+      updatedAt: nowIso(),
+      severityTrend: null,
       active: true
     }
   ];
@@ -248,7 +250,24 @@ export function buildSeedState(config: AppConfig): SeedState {
     },
     firstCollectedAt: snapshot.collectedAt,
     lastCollectedAt: snapshot.collectedAt,
-    sampleCount: 1
+    sampleCount: 1,
+    serviceSummaries: snapshot.services.map((service) => ({
+      tenantId: tenant.id,
+      serviceId: service.serviceId,
+      day: utcDayKey(snapshot.collectedAt),
+      overallStatus: service.status,
+      secondsByStatus: {
+        healthy: 0,
+        degraded: 0,
+        down: 0,
+        maintenance: 0,
+        unknown: 0
+      },
+      firstCollectedAt: snapshot.collectedAt,
+      lastCollectedAt: snapshot.collectedAt,
+      sampleCount: 1,
+      latestSummary: service.summary
+    }))
   };
 
   const incidents: Incident[] = [

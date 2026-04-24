@@ -146,6 +146,72 @@ test("Zabbix connector normalizes active problems into down status", async () =>
   }
 });
 
+test("Zabbix connector scopes global filters to matching services when services are listed", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return jsonResponse({
+        jsonrpc: "2.0",
+        result: [{ eventid: "2", name: "Core network link down", severity: 5 }]
+      });
+    }
+    return jsonResponse({
+      jsonrpc: "2.0",
+      result: []
+    });
+  };
+
+  try {
+    const authService: ServiceDefinition = {
+      id: "svc-auth",
+      tenantId: tenant.id,
+      name: "Authentication",
+      slug: "authentication",
+      category: "platform",
+      topic: "identity",
+      tags: ["critical"],
+      sourceType: "zabbix",
+      sourceRef: "zabbix:auth",
+      enabled: true
+    };
+    const networkService: ServiceDefinition = {
+      id: "svc-network",
+      tenantId: tenant.id,
+      name: "TN Core Network",
+      slug: "tn-core-network",
+      category: "infrastructure",
+      topic: "network",
+      tags: ["network"],
+      sourceType: "zabbix",
+      sourceRef: "zabbix:tn-core-network",
+      enabled: true
+    };
+    const connector = buildConnector(
+      "zabbix",
+      JSON.stringify({
+        baseUrl: "http://zabbix.example",
+        mode: "api",
+        tags: [{ tag: "Type", value: "Edge" }],
+        services: ["TN Core Network"]
+      }),
+      JSON.stringify({ token: "static-token" })
+    );
+
+    const outcome = await collectZabbixConnector({
+      ...buildContext(connector, networkService),
+      services: [authService, networkService]
+    });
+    assert.equal(outcome.run.status, "success");
+    assert.equal(outcome.results.length, 1);
+    assert.equal(outcome.results[0]?.serviceId, "svc-network");
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("PRTG connector normalizes sensor warnings into degraded status", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>

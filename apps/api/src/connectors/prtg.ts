@@ -45,13 +45,25 @@ function resolveBaseUrl(config: PrtgConfig): string | undefined {
   return config.baseUrl?.trim() || undefined;
 }
 
-function resolveServiceMapping(service: ServiceDefinition, config: PrtgConfig): PrtgMapping {
-  const services = config.services ?? [];
+function normalizeServiceMappings(services: PrtgConfig["services"] | undefined): PrtgMapping[] {
+  return ((services ?? []) as Array<PrtgMapping | string>)
+    .map((entry) => (typeof entry === "string" ? { ref: entry } : entry))
+    .filter((entry): entry is PrtgMapping => Boolean(entry));
+}
+
+function resolveServiceMapping(service: ServiceDefinition, config: PrtgConfig): PrtgMapping | undefined {
+  const services = normalizeServiceMappings(config.services);
   const candidates = services.filter((entry) => {
     const keys = [entry.ref, String(entry.objid ?? ""), entry.group, entry.device, entry.sensor];
     return keys.some((key) => key && [service.id, service.slug, service.sourceRef, service.name].some((candidate) => candidate === key || candidate.includes(key)));
   });
-  return candidates[0] ?? {
+  if (candidates[0]) {
+    return candidates[0];
+  }
+  if (services.length > 0) {
+    return undefined;
+  }
+  return {
     ref: service.sourceRef,
     sensor: service.name,
     summary: config.summary
@@ -158,6 +170,9 @@ export async function collectPrtgConnector(context: ConnectorCollectionContext):
 
     for (const service of context.services) {
       const mapping = resolveServiceMapping(service, config);
+      if (!mapping) {
+        continue;
+      }
       const row = rows.find((entry) => matchesRow(entry, mapping));
       if (!row) {
         continue;

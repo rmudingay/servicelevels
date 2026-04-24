@@ -262,6 +262,63 @@ textarea:focus {
   margin-left: auto;
 }
 
+.cachet-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 0 20px;
+  padding: 15px 0 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cachet-page-brand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 12px;
+}
+
+.cachet-page-logo,
+.cachet-page-logo-fallback {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+}
+
+.cachet-page-logo {
+  object-fit: contain;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.cachet-page-logo-fallback {
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  background: var(--accent);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-weight: 800;
+}
+
+.cachet-page-title {
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 300;
+  line-height: 1.1;
+}
+
+.cachet-page-subtitle,
+.cachet-page-product {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.cachet-page-product {
+  text-align: right;
+}
+
 .cachet-page h1,
 .cachet-page h2,
 .cachet-page h3,
@@ -412,6 +469,64 @@ textarea:focus {
 
 .cachet-page .component {
   font-weight: 400;
+}
+
+.cachet-page .cachet-component-line {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) minmax(220px, 0.82fr) minmax(86px, auto);
+  gap: 14px;
+  align-items: center;
+}
+
+.cachet-page .cachet-component-main {
+  min-width: 0;
+}
+
+.cachet-page .cachet-component-name {
+  display: block;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.cachet-page .cachet-component-summary {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cachet-page .status-history-bars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(3px, 1fr));
+  gap: 2px;
+  align-items: stretch;
+  width: 100%;
+  max-width: 380px;
+  min-height: 28px;
+  justify-self: end;
+}
+
+.cachet-page .status-history-bar {
+  display: block;
+  min-width: 3px;
+  height: 28px;
+  border-radius: 2px;
+  cursor: help;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.cachet-page .status-history-bar:hover,
+.cachet-page .status-history-bar:focus {
+  outline: 2px solid color-mix(in srgb, var(--text) 32%, transparent);
+  outline-offset: 1px;
+}
+
+.cachet-page .cachet-component-state {
+  justify-self: end;
+  font-weight: 700;
 }
 
 .cachet-page .pull-right {
@@ -611,9 +726,75 @@ textarea:focus {
   gap: 0.25rem;
 }
 
+.cachet-stat-list {
+  display: grid;
+  gap: 8px;
+}
+
+.cachet-stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.cachet-stat-row:last-child {
+  border-bottom: 0;
+}
+
+.cachet-stat-row span {
+  color: var(--muted-strong);
+}
+
+.cachet-stat-row strong {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 18px;
+}
+
+.banner-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--muted-strong);
+  background: var(--surface-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.banner-trend span:first-child {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.banner-trend-improved {
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.banner-trend-worse {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 12%, var(--surface));
+}
+
+.banner-trend-unchanged {
+  color: color-mix(in srgb, var(--amber) 80%, var(--text));
+  background: color-mix(in srgb, var(--amber) 16%, var(--surface));
+}
+
 .cachet-form {
   display: grid;
   gap: 14px;
+}
+
+.cachet-form-field {
+  display: grid;
+  gap: 5px;
 }
 
 .cachet-form label {
@@ -1547,6 +1728,15 @@ input:disabled {
     width: min(100vw - 18px, 1060px);
   }
 
+  .cachet-page-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .cachet-page-product {
+    text-align: left;
+  }
+
   .brand {
     align-items: flex-start;
   }
@@ -1564,6 +1754,16 @@ input:disabled {
   .cachet-alert,
   .component-row {
     grid-template-columns: 1fr;
+  }
+
+  .cachet-page .cachet-component-line {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .cachet-page .status-history-bars,
+  .cachet-page .cachet-component-state {
+    justify-self: stretch;
   }
 
   .cachet-alert {

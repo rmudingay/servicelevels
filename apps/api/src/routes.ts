@@ -16,7 +16,7 @@ import type { AppConfig } from "./config.js";
 import { normalizePlatformSettings, resolveEffectiveConfig } from "./settings.js";
 import type { StatusRepository } from "./store/types.js";
 import { nowIso, slugify } from "./utils.js";
-import type { Banner, IntegrationConnector, StatusLevel, Tenant } from "@service-levels/shared";
+import type { Banner, ConnectorType, IntegrationConnector, ServiceDefinition, StatusLevel, Tenant } from "@service-levels/shared";
 import { ingestWebhookEvent } from "./worker/pipeline.js";
 
 async function buildRss(store: StatusRepository, tenantSlug?: string): Promise<string> {
@@ -127,6 +127,22 @@ function normalizeJsonPayload(value: unknown, fieldName: string, fallback: strin
     return { error: `${fieldName} must be a JSON object` };
   }
   return { value: JSON.stringify(candidate) };
+}
+
+const connectorTypes: ConnectorType[] = ["zabbix", "prometheus", "prtg", "webhook"];
+
+function isConnectorType(value: unknown): value is ConnectorType {
+  return typeof value === "string" && connectorTypes.includes(value as ConnectorType);
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value.split(/[,\n]/).map((entry) => entry.trim()).filter(Boolean);
+  }
+  return [];
 }
 
 function isMainAdmin(request: { user?: { username: string } }, config: AppConfig): boolean {
@@ -521,6 +537,107 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
     return store.getTabs(tenantId);
   });
 
+  app.get("/api/v1/admin/services", { preHandler: requireAdmin(store, config) }, async (request) => {
+    const tenantSlug = parseTenantSlug(request.query as Record<string, unknown>);
+    const tenants = await store.getTenants();
+    const tenantId = tenantSlug ? tenants.find((tenant) => tenant.slug === tenantSlug)?.id : undefined;
+    return store.getServices(tenantId);
+  });
+
+  app.post("/api/v1/admin/services", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
+    const body = request.body as Partial<Omit<ServiceDefinition, "id" | "tenantId">> & { tenantSlug?: string; tags?: unknown };
+    const tenants = await store.getTenants();
+    const tenant = body.tenantSlug ? tenants.find((entry) => entry.slug === body.tenantSlug) : tenants[0];
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    const slug = slugify(typeof body.slug === "string" && body.slug ? body.slug : name);
+    if (!tenant || !name || !slug || !isConnectorType(body.sourceType)) {
+      reply.code(400).send({ error: "Tenant, service name, and source type are required" });
+      return;
+    }
+    const duplicate = (await store.getServices(tenant.id)).find((service) => service.slug === slug);
+    if (duplicate) {
+      reply.code(409).send({ error: "Service slug already exists for this tenant" });
+      return;
+    }
+    const service = await store.createService(tenant.id, {
+      name,
+      slug,
+      category: typeof body.category === "string" ? body.category.trim() : "",
+      topic: typeof body.topic === "string" ? body.topic.trim() : "",
+      tags: parseStringArray(body.tags),
+      sourceType: body.sourceType,
+      sourceRef: typeof body.sourceRef === "string" ? body.sourceRef.trim() : slug,
+      enabled: body.enabled ?? true
+    });
+    reply.code(201).send(service);
+  });
+
+  app.patch("/api/v1/admin/services/:id", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
+    const params = request.params as { id: string };
+    const body = request.body as Partial<Omit<ServiceDefinition, "id" | "tenantId">> & { tags?: unknown };
+    const current = (await store.getServices()).find((service) => service.id === params.id);
+    if (!current) {
+      reply.code(404).send({ error: "Service not found" });
+      return;
+    }
+    const patch: Partial<Omit<ServiceDefinition, "id" | "tenantId">> = {};
+    if (body.name !== undefined) {
+      const name = body.name.trim();
+      if (!name) {
+        reply.code(400).send({ error: "Service name cannot be empty" });
+        return;
+      }
+      patch.name = name;
+    }
+    if (body.slug !== undefined) {
+      const slug = slugify(body.slug);
+      if (!slug) {
+        reply.code(400).send({ error: "Service slug cannot be empty" });
+        return;
+      }
+      const duplicate = (await store.getServices(current.tenantId)).find((service) => service.slug === slug && service.id !== params.id);
+      if (duplicate) {
+        reply.code(409).send({ error: "Service slug already exists for this tenant" });
+        return;
+      }
+      patch.slug = slug;
+    }
+    if (body.category !== undefined) {
+      patch.category = body.category.trim();
+    }
+    if (body.topic !== undefined) {
+      patch.topic = body.topic.trim();
+    }
+    if (body.tags !== undefined) {
+      patch.tags = parseStringArray(body.tags);
+    }
+    if (body.sourceType !== undefined) {
+      if (!isConnectorType(body.sourceType)) {
+        reply.code(400).send({ error: "Unsupported service source type" });
+        return;
+      }
+      patch.sourceType = body.sourceType;
+    }
+    if (body.sourceRef !== undefined) {
+      patch.sourceRef = body.sourceRef.trim();
+    }
+    if (body.enabled !== undefined) {
+      patch.enabled = body.enabled;
+    }
+    const updated = await store.updateService(params.id, patch);
+    reply.send(updated);
+  });
+
+  app.delete("/api/v1/admin/services/:id", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
+    const params = request.params as { id: string };
+    const removed = await store.deleteService(params.id);
+    if (!removed) {
+      reply.code(404).send({ error: "Service not found" });
+      return;
+    }
+    reply.send({ ok: true });
+  });
+
   app.get("/api/v1/admin/connectors", { preHandler: requireAdmin(store, config) }, async (request) => {
     const tenantSlug = parseTenantSlug(request.query as Record<string, unknown>);
     const tenants = await store.getTenants();
@@ -625,6 +742,64 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
     reply.code(201).send(tab);
   });
 
+  app.patch("/api/v1/admin/tabs/:id", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
+    const params = request.params as { id: string };
+    const body = request.body as Partial<{ title: string; filterQuery: string; isGlobal: boolean; enabled: boolean; sortOrder: number }>;
+    const current = (await store.getTabs()).find((tab) => tab.id === params.id);
+    if (!current) {
+      reply.code(404).send({ error: "Tab not found" });
+      return;
+    }
+
+    const patch: Partial<Omit<typeof current, "id" | "tenantId">> = {};
+    if (body.title !== undefined) {
+      const title = body.title.trim();
+      const slug = slugify(title);
+      if (!title || !slug) {
+        reply.code(400).send({ error: "Tab title cannot be empty" });
+        return;
+      }
+      const duplicate = (await store.getTabs(current.tenantId)).find((tab) => tab.slug === slug && tab.id !== params.id);
+      if (duplicate) {
+        reply.code(409).send({ error: "Tab title already exists for this tenant" });
+        return;
+      }
+      patch.title = title;
+      patch.slug = slug;
+    }
+    if (body.filterQuery !== undefined) {
+      patch.filterQuery = body.filterQuery.trim();
+    }
+    if (body.isGlobal !== undefined) {
+      patch.isGlobal = Boolean(body.isGlobal);
+    }
+    if (body.enabled !== undefined) {
+      patch.enabled = Boolean(body.enabled);
+    }
+    if (body.sortOrder !== undefined && Number.isFinite(body.sortOrder)) {
+      patch.sortOrder = Number(body.sortOrder);
+    }
+
+    const updated = await store.updateTab(params.id, patch);
+    reply.send(updated);
+  });
+
+  app.delete("/api/v1/admin/tabs/:id", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
+    const params = request.params as { id: string };
+    const current = (await store.getTabs()).find((tab) => tab.id === params.id);
+    if (!current) {
+      reply.code(404).send({ error: "Tab not found" });
+      return;
+    }
+    const tenantTabs = await store.getTabs(current.tenantId);
+    if (tenantTabs.length <= 1) {
+      reply.code(400).send({ error: "Cannot delete the last tab for a tenant" });
+      return;
+    }
+    const removed = await store.deleteTab(params.id);
+    reply.send({ ok: removed });
+  });
+
   app.get("/api/v1/admin/banners", { preHandler: requireAdmin(store, config) }, async (request) => {
     const tenantSlug = parseTenantSlug(request.query as Record<string, unknown>);
     const tenants = await store.getTenants();
@@ -677,6 +852,8 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
       severity: body.severity ?? "degraded",
       startsAt: null,
       endsAt: null,
+      updatedAt: nowIso(),
+      severityTrend: null,
       active: true
     });
     reply.code(201).send(banner);

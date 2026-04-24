@@ -72,17 +72,18 @@ function hasActionableFilters(mapping: ZabbixMapping | undefined): boolean {
   );
 }
 
+function normalizeServiceMappings(services: ZabbixConfig["services"] | undefined): ZabbixMapping[] {
+  return ((services ?? []) as Array<ZabbixMapping | string>)
+    .map((entry) => (typeof entry === "string" ? { ref: entry } : entry))
+    .filter((entry): entry is ZabbixMapping => Boolean(entry));
+}
+
 function resolveServiceMapping(service: ServiceDefinition, config: ZabbixConfig): ZabbixMapping | undefined {
-  const services = config.services ?? [];
+  const services = normalizeServiceMappings(config.services);
   const candidates = services.filter((entry) => {
     const keys = [entry.ref, entry.sourceRef, entry.slug, entry.name];
     return keys.some((key) => key && [service.id, service.slug, service.sourceRef, service.name].some((candidate) => candidate === key || candidate.includes(key)));
   });
-  const explicit = candidates[0];
-  if (hasActionableFilters(explicit)) {
-    return explicit;
-  }
-
   const globalMapping: ZabbixMapping = {
     hostIds: config.hostIds,
     groupIds: config.groupIds,
@@ -91,6 +92,15 @@ function resolveServiceMapping(service: ServiceDefinition, config: ZabbixConfig)
     evaltype: config.evaltype,
     summary: config.summary
   };
+  const explicit = candidates[0];
+  if (explicit) {
+    const merged = hasActionableFilters(explicit) ? explicit : { ...globalMapping, ...explicit };
+    return hasActionableFilters(merged) ? merged : undefined;
+  }
+
+  if (services.length > 0) {
+    return undefined;
+  }
 
   return hasActionableFilters(globalMapping) ? globalMapping : undefined;
 }

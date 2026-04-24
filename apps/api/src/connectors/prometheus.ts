@@ -83,8 +83,14 @@ function hasActionableMapping(mapping: PrometheusServiceMapping | undefined): bo
   );
 }
 
+function normalizeServiceMappings(services: PrometheusConfig["services"] | undefined): PrometheusServiceMapping[] {
+  return ((services ?? []) as Array<PrometheusServiceMapping | string>)
+    .map((entry) => (typeof entry === "string" ? { ref: entry } : entry))
+    .filter((entry): entry is PrometheusServiceMapping => Boolean(entry));
+}
+
 function resolveServiceMapping(service: ServiceDefinition, config: PrometheusConfig): PrometheusServiceMapping | undefined {
-  const services = config.services ?? [];
+  const services = normalizeServiceMappings(config.services);
   const candidates = services.filter((entry) => {
     const keys = [entry.ref, entry.sourceRef, entry.slug, entry.name];
     return keys.some((key) => key && [service.id, service.slug, service.sourceRef, service.name].some((candidate) => candidate === key || candidate.includes(key)));
@@ -94,15 +100,20 @@ function resolveServiceMapping(service: ServiceDefinition, config: PrometheusCon
     return explicit;
   }
 
-  if (config.query || config.ruleName || looksLikePromql(service.sourceRef)) {
-    return {
-      query: config.query ?? (looksLikePromql(service.sourceRef) ? service.sourceRef : undefined),
-      ruleName: config.ruleName,
-      summary: config.summary
-    };
+  if (services.length > 0 && !explicit) {
+    return undefined;
   }
 
-  return undefined;
+  const fallback =
+    config.query || config.ruleName || looksLikePromql(service.sourceRef)
+      ? {
+          query: config.query ?? (looksLikePromql(service.sourceRef) ? service.sourceRef : undefined),
+          ruleName: config.ruleName,
+          summary: config.summary
+        }
+      : undefined;
+
+  return explicit && fallback ? { ...fallback, ...explicit } : fallback;
 }
 
 async function prometheusRequest(baseUrl: string, path: string, query: Record<string, string | number | boolean | Array<string | number | boolean> | undefined>, auth: PrometheusAuth, timeoutMs: number): Promise<JsonObject> {

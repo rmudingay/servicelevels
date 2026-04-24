@@ -2,6 +2,7 @@ export type StatusLevel = "healthy" | "degraded" | "down" | "maintenance" | "unk
 export type ThemeMode = "light" | "dark";
 export type AuthMode = "public" | "ip" | "local" | "ldap" | "saml" | "oauth" | "oidc";
 export type BannerScope = "global" | "tenant" | "tab" | "category" | "service";
+export type BannerSeverityTrend = "improved" | "worse" | "unchanged";
 export type ConnectorType = "zabbix" | "prometheus" | "prtg" | "webhook";
 
 export interface Branding {
@@ -67,6 +68,8 @@ export interface Banner {
   severity: StatusLevel;
   startsAt: string | null;
   endsAt: string | null;
+  updatedAt: string | null;
+  severityTrend: BannerSeverityTrend | null;
   active: boolean;
 }
 
@@ -184,6 +187,18 @@ export interface Snapshot {
   rawPayload: unknown;
 }
 
+export interface ServiceDailySummary {
+  tenantId: string;
+  serviceId: string;
+  day: string;
+  overallStatus: StatusLevel;
+  secondsByStatus: Record<StatusLevel, number>;
+  firstCollectedAt: string;
+  lastCollectedAt: string;
+  sampleCount: number;
+  latestSummary: string;
+}
+
 export interface StatusDailySummary {
   tenantId: string;
   day: string;
@@ -192,6 +207,7 @@ export interface StatusDailySummary {
   firstCollectedAt: string;
   lastCollectedAt: string;
   sampleCount: number;
+  serviceSummaries: ServiceDailySummary[];
 }
 
 export interface AdminUser {

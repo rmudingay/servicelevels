@@ -104,6 +104,128 @@ export function colorFor(status: StatusLevel, colors: ColorMapping[]): string {
   return colors.find((entry) => entry.statusKey === status)?.colorHex ?? "#7A7F87";
 }
 
+type StatusBarEntry = {
+  key: string;
+  day: string;
+  status: StatusLevel;
+  summary: string;
+  firstCollectedAt: string;
+  lastCollectedAt: string;
+  sampleCount: number;
+};
+
+const serviceHistoryLimit = 90;
+
+function formatDay(day: string): string {
+  return new Date(`${day}T12:00:00`).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric"
+  });
+}
+
+function formatDateTime(value?: string | null): string {
+  if (!value) {
+    return "not updated";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "not updated";
+  }
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function bannerTrendLabel(trend: Banner["severityTrend"]): string {
+  switch (trend) {
+    case "improved":
+      return "improved";
+    case "worse":
+      return "worse";
+    case "unchanged":
+      return "unchanged";
+    default:
+      return "no change recorded";
+  }
+}
+
+function bannerTrendSymbol(trend: Banner["severityTrend"]): string {
+  switch (trend) {
+    case "improved":
+      return "↑";
+    case "worse":
+      return "↓";
+    case "unchanged":
+      return "|";
+    default:
+      return "•";
+  }
+}
+
+function summarizeSeconds(secondsByStatus: Record<StatusLevel, number>): string {
+  return statusChoices
+    .map((statusKey) => {
+      const seconds = Math.round(secondsByStatus[statusKey] ?? 0);
+      if (seconds <= 0) {
+        return "";
+      }
+      const minutes = Math.round(seconds / 60);
+      return minutes > 0 ? `${statusLabel(statusKey)} ${minutes}m` : `${statusLabel(statusKey)} ${seconds}s`;
+    })
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function serviceStatusHistory(status: StatusView, service: ServiceDefinition): StatusBarEntry[] {
+  const serviceSnapshot = status.snapshot?.services.find((entry) => entry.serviceId === service.id);
+  const fromSummaries = status.dailySummaries
+    .map((summary) => {
+      const serviceSummary = summary.serviceSummaries.find((entry) => entry.serviceId === service.id);
+      if (!serviceSummary) {
+        return null;
+      }
+      const durationSummary = summarizeSeconds(serviceSummary.secondsByStatus);
+      return {
+        key: `${service.id}-${summary.day}`,
+        day: summary.day,
+        status: serviceSummary.overallStatus,
+        summary: [serviceSummary.latestSummary, durationSummary].filter(Boolean).join(" · ") || statusLabel(serviceSummary.overallStatus),
+        firstCollectedAt: serviceSummary.firstCollectedAt,
+        lastCollectedAt: serviceSummary.lastCollectedAt,
+        sampleCount: serviceSummary.sampleCount
+      };
+    })
+    .filter((entry): entry is StatusBarEntry => Boolean(entry))
+    .sort((left, right) => left.day.localeCompare(right.day))
+    .slice(-serviceHistoryLimit);
+
+  if (fromSummaries.length > 0) {
+    return fromSummaries;
+  }
+
+  const observedAt = serviceSnapshot?.lastCheckedAt ?? status.snapshot?.collectedAt ?? new Date().toISOString();
+  return [
+    {
+      key: `${service.id}-current`,
+      day: observedAt.slice(0, 10),
+      status: serviceSnapshot?.status ?? "unknown",
+      summary: serviceSnapshot?.summary ?? "Awaiting collection",
+      firstCollectedAt: observedAt,
+      lastCollectedAt: observedAt,
+      sampleCount: serviceSnapshot ? 1 : 0
+    }
+  ];
+}
+
+function statusBarTitle(entry: StatusBarEntry): string {
+  return [
+    `${formatDay(entry.day)}: ${statusLabel(entry.status)}`,
+    entry.summary,
+    `Samples: ${entry.sampleCount}`,
+    `Observed: ${new Date(entry.firstCollectedAt).toLocaleString()} - ${new Date(entry.lastCollectedAt).toLocaleString()}`
+  ].join("\n");
+}
+
 export function authModeLabel(mode: AuthMode): string {
   switch (mode) {
     case "public":
@@ -258,6 +380,35 @@ function Shell({
       </header>
       <main className="page-content">{children}</main>
     </div>
+  );
+}
+
+function CachetHeader({
+  meta,
+  title,
+  subtitle
+}: {
+  meta: Pick<AppMeta, "appName" | "logoUrl">;
+  title: string;
+  subtitle?: string;
+}) {
+  return (
+    <header className="cachet-page-header">
+      <div className="cachet-page-brand">
+        {meta.logoUrl ? (
+          <img className="cachet-page-logo" src={meta.logoUrl} alt={`${meta.appName} logo`} />
+        ) : (
+          <div className="cachet-page-logo-fallback" aria-hidden="true">
+            SL
+          </div>
+        )}
+        <div>
+          <div className="cachet-page-title">{title}</div>
+          {subtitle && <div className="cachet-page-subtitle">{subtitle}</div>}
+        </div>
+      </div>
+      <div className="cachet-page-product">{meta.appName}</div>
+    </header>
   );
 }
 
@@ -445,7 +596,8 @@ export function StatusPage() {
   }
 
   const meta = status.meta;
-  const componentGroups = (status.tabs.length > 0 ? status.tabs : [undefined]).map((tab) => {
+  const visibleTabs = status.tabs.filter((tab) => tab.enabled);
+  const componentGroups = (visibleTabs.length > 0 ? visibleTabs : [undefined]).map((tab) => {
     const services = status.services.filter((service) => matchesFilter(service, tab?.filterQuery ?? ""));
     const groupStatus = services.reduce<StatusLevel>((current, service) => {
       const serviceStatus = status.snapshot?.services.find((entry) => entry.serviceId === service.id)?.status ?? "unknown";
@@ -480,6 +632,7 @@ export function StatusPage() {
   return (
     <div className="cachet-page">
       <div className="container" id="app">
+        <CachetHeader meta={meta} title="Service Status" subtitle={currentTenant?.name ?? "All tenants"} />
         <div className="section-messages">
           {noticeBanners.map((banner) => (
             <div key={banner.id} className={`alert alert-${banner.severity === "down" ? "danger" : banner.severity === "healthy" ? "success" : banner.severity === "maintenance" ? "info" : "warning"}`}>
@@ -521,11 +674,27 @@ export function StatusPage() {
               {group.services.map((service) => {
                 const serviceSnapshot = status.snapshot?.services.find((entry) => entry.serviceId === service.id);
                 const serviceStatus = serviceSnapshot?.status ?? "unknown";
+                const history = serviceStatusHistory(status, service);
                 return (
                   <li key={`${group.key}-${service.id}`} className={`list-group-item component status-${serviceStatus}`} title={serviceSnapshot?.summary ?? service.topic}>
-                    <span>{service.name}</span>
-                    <div className="pull-right">
-                      <small className={`text-component-${serviceStatus}`} style={{ color: colorFor(serviceStatus, status.colors) }}>
+                    <div className="cachet-component-line">
+                      <div className="cachet-component-main">
+                        <span className="cachet-component-name">{service.name}</span>
+                        {serviceSnapshot?.summary && <span className="cachet-component-summary">{serviceSnapshot.summary}</span>}
+                      </div>
+                      <div className="status-history-bars" aria-label={`${service.name} status history`}>
+                        {history.map((entry) => (
+                          <span
+                            key={entry.key}
+                            className="status-history-bar"
+                            style={{ backgroundColor: colorFor(entry.status, status.colors) }}
+                            title={statusBarTitle(entry)}
+                            aria-label={`${formatDay(entry.day)} ${statusLabel(entry.status)}`}
+                            tabIndex={0}
+                          />
+                        ))}
+                      </div>
+                      <small className={`text-component-${serviceStatus} cachet-component-state`} style={{ color: colorFor(serviceStatus, status.colors) }}>
                         {statusLabel(serviceStatus)}
                       </small>
                     </div>
@@ -619,12 +788,26 @@ export function StatusPage() {
   );
 }
 
-type AdminSection = "overview" | "tenants" | "banners" | "connectors" | "notifications" | "access" | "identity" | "appearance";
-type AdminModal = "tenant" | "banner" | "connector" | "user" | "subscription" | "branding" | "tab" | "colors" | "auth-settings" | "notification-settings" | null;
+type AdminSection = "overview" | "tenants" | "services" | "banners" | "connectors" | "notifications" | "access" | "identity" | "appearance";
+type AdminModal =
+  | "tenant"
+  | "service"
+  | "banner"
+  | "connector"
+  | "user"
+  | "subscription"
+  | "branding"
+  | "tab"
+  | "colors"
+  | "auth-settings"
+  | "slack-settings"
+  | "smtp-settings"
+  | null;
 
 const adminSections: Array<{ id: AdminSection; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "tenants", label: "Tenants" },
+  { id: "services", label: "Services" },
   { id: "banners", label: "Banners" },
   { id: "connectors", label: "Connectors" },
   { id: "notifications", label: "Notifications" },
@@ -669,26 +852,26 @@ function connectorTemplate(type: IntegrationConnector["type"]): Pick<Integration
     case "prometheus":
       return {
         pollIntervalSeconds: 300,
-        configJson: JSON.stringify({ baseUrl: "https://prometheus.example.org", mode: "mixed", services: [] }, null, 2),
+        configJson: JSON.stringify({ baseUrl: "https://prometheus.example.org", mode: "mixed", services: [{ ref: "prometheus:metrics", query: "up" }] }, null, 2),
         authJson: JSON.stringify({ bearerToken: "" }, null, 2)
       };
     case "prtg":
       return {
         pollIntervalSeconds: 300,
-        configJson: JSON.stringify({ baseUrl: "https://prtg.example.org", mode: "table", services: [] }, null, 2),
+        configJson: JSON.stringify({ baseUrl: "https://prtg.example.org", mode: "table", services: [{ ref: "prtg:network", sensorId: 1234 }] }, null, 2),
         authJson: JSON.stringify({ apiToken: "", username: "", passhash: "" }, null, 2)
       };
     case "webhook":
       return {
         pollIntervalSeconds: 300,
-        configJson: JSON.stringify({ sourceKey: "external-source", secret: "", defaultStatus: "unknown", services: [] }, null, 2),
+        configJson: JSON.stringify({ sourceKey: "external-source", secret: "", defaultStatus: "unknown", services: [{ ref: "webhook:service" }] }, null, 2),
         authJson: "{}"
       };
     case "zabbix":
     default:
       return {
         pollIntervalSeconds: 300,
-        configJson: JSON.stringify({ baseUrl: "https://zabbix.example.org/api_jsonrpc.php", mode: "api", tags: [], services: [], tlsRejectUnauthorized: true }, null, 2),
+        configJson: JSON.stringify({ baseUrl: "https://zabbix.example.org/api_jsonrpc.php", mode: "api", tags: [], services: [{ ref: "zabbix:service" }], tlsRejectUnauthorized: true }, null, 2),
         authJson: JSON.stringify({ username: "", password: "", token: "" }, null, 2)
       };
   }
@@ -699,27 +882,27 @@ function connectorHelp(type: IntegrationConnector["type"]): { nameHelp: string; 
     return {
       nameHelp:
         "A display label and fallback source match. Inbound posts use /api/v1/webhooks/:tenantSlug/:source; :source matches this name, connector id, or config.sourceKey.",
-      configHelp: "Set sourceKey and optional secret. services[] maps incoming payload fields to status-page services.",
+      configHelp: "Set sourceKey and optional secret. services[].ref should match a service Source ref, slug, name, or id.",
       authHelp: "Webhook auth is normally config.secret, sent as Bearer token, token query parameter, or x-webhook-secret."
     };
   }
   if (type === "prometheus") {
     return {
       nameHelp: "A display label for this Prometheus integration. Put the Prometheus URL in Config JSON baseUrl.",
-      configHelp: "Use baseUrl, mode, query/ruleName, labels, and services[] mappings. The name is not a hostname.",
+      configHelp: "Use baseUrl, mode, query/ruleName, labels, and services[].ref mappings. The ref links connector output to a status-page service.",
       authHelp: "Use bearerToken, username/password, or custom headers."
     };
   }
   if (type === "prtg") {
     return {
       nameHelp: "A display label for this PRTG integration. Put the PRTG URL in Config JSON baseUrl.",
-      configHelp: "Use baseUrl, mode, and services[] mappings with objid/group/device/sensor.",
+      configHelp: "Use baseUrl, mode, and services[].ref mappings with objid/group/device/sensor.",
       authHelp: "Use apiToken, or username plus passhash/password."
     };
   }
   return {
     nameHelp: "A display label for this Zabbix integration. Put the Zabbix API URL in Config JSON baseUrl.",
-    configHelp: "Use baseUrl, mode, hostIds, groupIds, tags, severities, services[] mappings, and optional caCert/tlsRejectUnauthorized.",
+    configHelp: "Use baseUrl, mode, hostIds, groupIds, tags, severities, services[].ref mappings, and optional caCert/tlsRejectUnauthorized.",
     authHelp: "Use token or username/password."
   };
 }
@@ -787,6 +970,17 @@ export function AdminPage() {
     enabled: true
   });
   const [editingTenantId, setEditingTenantId] = useState<string | null>(null);
+  const [serviceForm, setServiceForm] = useState({
+    name: "",
+    slug: "",
+    category: "infrastructure",
+    topic: "",
+    tags: "",
+    sourceType: "zabbix" as ServiceDefinition["sourceType"],
+    sourceRef: "",
+    enabled: true
+  });
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [bannerForm, setBannerForm] = useState({
     scopeType: "tenant" as Banner["scopeType"],
     scopeRef: "primary-site",
@@ -798,8 +992,10 @@ export function AdminPage() {
   const [tabForm, setTabForm] = useState({
     title: "",
     filterQuery: "",
-    isGlobal: false
+    isGlobal: false,
+    enabled: true
   });
+  const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [userForm, setUserForm] = useState({
     username: "",
     displayName: "",
@@ -1048,6 +1244,72 @@ export function AdminPage() {
     setAdminModal("tenant");
   }
 
+  function resetServiceForm(): void {
+    setServiceForm({
+      name: "",
+      slug: "",
+      category: "infrastructure",
+      topic: "",
+      tags: "",
+      sourceType: "zabbix",
+      sourceRef: "",
+      enabled: true
+    });
+    setEditingServiceId(null);
+  }
+
+  async function handleServiceSave(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const payload = {
+      name: serviceForm.name,
+      slug: serviceForm.slug,
+      category: serviceForm.category,
+      topic: serviceForm.topic,
+      tags: serviceForm.tags.split(/[,\n]/).map((entry) => entry.trim()).filter(Boolean),
+      sourceType: serviceForm.sourceType,
+      sourceRef: serviceForm.sourceRef,
+      enabled: serviceForm.enabled
+    };
+    if (editingServiceId) {
+      await api.updateService(editingServiceId, payload);
+      setMessage("Service updated.");
+    } else {
+      await api.createService({
+        tenantSlug,
+        ...payload
+      });
+      setMessage("Service created.");
+    }
+    resetServiceForm();
+    setAdminModal(null);
+    await refresh();
+  }
+
+  function handleServiceEdit(service: ServiceDefinition): void {
+    setServiceForm({
+      name: service.name,
+      slug: service.slug,
+      category: service.category,
+      topic: service.topic,
+      tags: service.tags.join(", "),
+      sourceType: service.sourceType,
+      sourceRef: service.sourceRef,
+      enabled: service.enabled
+    });
+    setEditingServiceId(service.id);
+    setActiveAdminSection("services");
+    setAdminModal("service");
+  }
+
+  async function handleServiceDelete(id: string): Promise<void> {
+    await api.deleteService(id);
+    if (editingServiceId === id) {
+      resetServiceForm();
+    }
+    setMessage("Service deleted.");
+    await refresh();
+  }
+
   async function handleBannerSave(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (editingBannerId) {
@@ -1120,17 +1382,50 @@ export function AdminPage() {
     await refresh();
   }
 
-  async function handleTabCreate(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+  async function handleTabSave(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    await api.createTab({
-      tenantSlug,
-      title: tabForm.title,
-      filterQuery: tabForm.filterQuery,
-      isGlobal: tabForm.isGlobal
-    });
-    setTabForm({ title: "", filterQuery: "", isGlobal: false });
-    setMessage("Tab created.");
+    if (editingTabId) {
+      await api.updateTab(editingTabId, {
+        title: tabForm.title,
+        filterQuery: tabForm.filterQuery,
+        isGlobal: tabForm.isGlobal,
+        enabled: tabForm.enabled
+      });
+      setMessage("Tab updated.");
+    } else {
+      await api.createTab({
+        tenantSlug,
+        title: tabForm.title,
+        filterQuery: tabForm.filterQuery,
+        isGlobal: tabForm.isGlobal
+      });
+      setMessage("Tab created.");
+    }
+    setTabForm({ title: "", filterQuery: "", isGlobal: false, enabled: true });
+    setEditingTabId(null);
     setAdminModal(null);
+    await refresh();
+  }
+
+  function handleTabEdit(tab: TabDefinition): void {
+    setTabForm({
+      title: tab.title,
+      filterQuery: tab.filterQuery,
+      isGlobal: tab.isGlobal,
+      enabled: tab.enabled
+    });
+    setEditingTabId(tab.id);
+    setActiveAdminSection("appearance");
+    setAdminModal("tab");
+  }
+
+  async function handleTabDelete(tab: TabDefinition): Promise<void> {
+    await api.deleteTab(tab.id);
+    if (editingTabId === tab.id) {
+      setEditingTabId(null);
+      setTabForm({ title: "", filterQuery: "", isGlobal: false, enabled: true });
+    }
+    setMessage("Tab deleted.");
     await refresh();
   }
 
@@ -1254,9 +1549,12 @@ export function AdminPage() {
     setAdminModal(null);
     setEditingTenantId(null);
     setTenantForm({ name: "", slug: "", description: "", enabled: true });
+    resetServiceForm();
     setEditingBannerId(null);
     setBannerForm({ scopeType: "tenant", scopeRef: tenantSlug, title: "", message: "", severity: "maintenance" });
     resetConnectorForm();
+    setEditingTabId(null);
+    setTabForm({ title: "", filterQuery: "", isGlobal: false, enabled: true });
   }
 
   function openTenantCreate(): void {
@@ -1264,6 +1562,12 @@ export function AdminPage() {
     setEditingTenantId(null);
     setActiveAdminSection("tenants");
     setAdminModal("tenant");
+  }
+
+  function openServiceCreate(): void {
+    resetServiceForm();
+    setActiveAdminSection("services");
+    setAdminModal("service");
   }
 
   function openBannerCreate(): void {
@@ -1303,14 +1607,21 @@ export function AdminPage() {
     setAdminModal("auth-settings");
   }
 
-  function openNotificationSettings(): void {
+  function openSlackSettings(): void {
     setNotificationSettingsForm(platformSettings.notifications);
     setActiveAdminSection("notifications");
-    setAdminModal("notification-settings");
+    setAdminModal("slack-settings");
+  }
+
+  function openSmtpSettings(): void {
+    setNotificationSettingsForm(platformSettings.notifications);
+    setActiveAdminSection("notifications");
+    setAdminModal("smtp-settings");
   }
 
   function openTabCreate(): void {
-    setTabForm({ title: "", filterQuery: "", isGlobal: false });
+    setTabForm({ title: "", filterQuery: "", isGlobal: false, enabled: true });
+    setEditingTabId(null);
     setActiveAdminSection("appearance");
     setAdminModal("tab");
   }
@@ -1321,13 +1632,14 @@ export function AdminPage() {
   return (
     <div className="cachet-page cachet-admin-page">
       <div className="container" id="admin-app">
+        <CachetHeader meta={adminMeta} title="Admin Dashboard" subtitle="Control plane" />
         <div className="section-status">
           <div className={`alert ${authenticated ? "alert-success" : "alert-info"}`}>{authenticated ? "Authenticated admin session active" : "Admin authentication required"}</div>
         </div>
 
         <div className="about-app">
           <h2>Admin Dashboard</h2>
-          <p>Configure tenants, monitoring connectors, banners, notifications, access, and presentation for {adminMeta.appName}.</p>
+          <p>Configure tenants, service mappings, monitoring connectors, banners, notifications, access, and presentation for {adminMeta.appName}.</p>
           {authenticated && (
             <div className="cachet-admin-toolbar">
               <div className="cachet-controls">
@@ -1425,7 +1737,32 @@ export function AdminPage() {
                       <div className="cachet-row-meta">{currentTenant?.description || "No description"}</div>
                     </div>
                     <div className="list-group-item">
-                      {status?.tenants.length ?? 0} tenants · {connectors.length} connectors · {activeBanners.length} active banners · {inactiveBanners.length} inactive banners · {subscriptions.length} notification targets
+                      <div className="cachet-stat-list">
+                        <div className="cachet-stat-row">
+                          <span>Tenants</span>
+                          <strong>{status?.tenants.length ?? 0}</strong>
+                        </div>
+                        <div className="cachet-stat-row">
+                          <span>Services</span>
+                          <strong>{status?.services.length ?? 0}</strong>
+                        </div>
+                        <div className="cachet-stat-row">
+                          <span>Connectors</span>
+                          <strong>{connectors.length}</strong>
+                        </div>
+                        <div className="cachet-stat-row">
+                          <span>Active banners</span>
+                          <strong>{activeBanners.length}</strong>
+                        </div>
+                        <div className="cachet-stat-row">
+                          <span>Inactive banners</span>
+                          <strong>{inactiveBanners.length}</strong>
+                        </div>
+                        <div className="cachet-stat-row">
+                          <span>Notification targets</span>
+                          <strong>{subscriptions.length}</strong>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1481,6 +1818,48 @@ export function AdminPage() {
               </div>
             )}
 
+            {activeAdminSection === "services" && (
+              <div className="section-scheduled">
+                <div className="panel panel-default">
+                  <div className="panel-heading cachet-panel-actions">
+                    <strong>Services</strong>
+                    <button className="btn btn-success" type="button" onClick={openServiceCreate}>
+                      Create service
+                    </button>
+                  </div>
+                  <div className="list-group">
+                    {(status?.services ?? []).length === 0 ? (
+                      <div className="list-group-item">No services configured for this tenant.</div>
+                    ) : (
+                      (status?.services ?? []).map((service) => (
+                        <div key={service.id} className="list-group-item">
+                          <strong>{service.name}</strong>{" "}
+                          <span className="cachet-row-meta">
+                            {service.sourceType} · {service.sourceRef || service.slug} · {service.enabled ? "enabled" : "disabled"}
+                          </span>
+                          <div className="pull-right cachet-row-actions">
+                            <button className="btn btn-link" type="button" onClick={() => handleServiceEdit(service)}>
+                              Edit
+                            </button>
+                            <button className="btn btn-link" type="button" onClick={() => void handleServiceDelete(service.id)}>
+                              Delete
+                            </button>
+                          </div>
+                          <div className="cachet-row-meta">
+                            category:{service.category || "none"} · topic:{service.topic || "none"}
+                            {service.tags.length > 0 ? ` · tags:${service.tags.join(", ")}` : ""}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+                <p className="cachet-help-text">
+                  Tabs use filters like category:infrastructure or tag:network. Connector services[].ref should match the service Source ref to place monitoring output under the intended tab.
+                </p>
+              </div>
+            )}
+
             {activeAdminSection === "connectors" && (
               <div className="section-scheduled">
                 <div className="panel panel-default">
@@ -1526,7 +1905,10 @@ export function AdminPage() {
                   <div className="list-group">
                     {(status?.banners ?? []).map((banner) => (
                       <div key={banner.id} className="list-group-item">
-                        <strong>{banner.title}</strong> <span className="cachet-row-meta">{statusLabel(banner.severity)} · {banner.active ? "active" : "inactive"}</span>
+                        <strong>{banner.title}</strong>{" "}
+                        <span className="cachet-row-meta">
+                          {statusLabel(banner.severity)} · {banner.active ? "active" : "inactive"} · updated {formatDateTime(banner.updatedAt)}
+                        </span>
                         <div className="pull-right cachet-row-actions">
                           <button className="btn btn-link" type="button" onClick={() => handleBannerEdit(banner)}>
                             Edit
@@ -1542,6 +1924,10 @@ export function AdminPage() {
                           {banner.scopeType}
                           {banner.scopeRef ? `:${banner.scopeRef}` : ""} · {banner.message}
                         </div>
+                        <div className={`banner-trend banner-trend-${banner.severityTrend ?? "none"}`} title={`Severity trend: ${bannerTrendLabel(banner.severityTrend)}`}>
+                          <span aria-hidden="true">{bannerTrendSymbol(banner.severityTrend)}</span>
+                          <span>{bannerTrendLabel(banner.severityTrend)}</span>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1553,22 +1939,33 @@ export function AdminPage() {
               <div className="section-scheduled">
                 <div className="panel panel-default">
                   <div className="panel-heading cachet-panel-actions">
-                    <strong>Delivery settings</strong>
-                    <button className="btn btn-link" type="button" onClick={openNotificationSettings}>
+                    <strong>SMTP server</strong>
+                    <button className="btn btn-link" type="button" onClick={openSmtpSettings}>
                       Edit
                     </button>
                   </div>
                   <div className="list-group">
                     <div className="list-group-item">
-                      <strong>SMTP server</strong>
+                      <strong>Email delivery</strong>
                       <div className="cachet-row-meta">
                         {platformSettings.notifications.smtpHost
                           ? `${platformSettings.notifications.smtpHost}:${platformSettings.notifications.smtpPort} · from ${platformSettings.notifications.smtpFrom || "not set"}`
                           : "Not configured"}
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                <div className="panel panel-default">
+                  <div className="panel-heading cachet-panel-actions">
+                    <strong>Global Slack webhook</strong>
+                    <button className="btn btn-link" type="button" onClick={openSlackSettings}>
+                      Edit
+                    </button>
+                  </div>
+                  <div className="list-group">
                     <div className="list-group-item">
-                      <strong>Global Slack webhook</strong>
+                      <strong>Slack delivery</strong>
                       <div className="cachet-row-meta">{platformSettings.notifications.slackWebhookUrl ? "Configured" : "Not configured"}</div>
                     </div>
                   </div>
@@ -1767,8 +2164,31 @@ export function AdminPage() {
                           Create tab
                         </button>
                       </div>
-                      <div className="cachet-row-meta">{tabs.map((tab) => tab.title).join(", ") || "No tabs configured"}</div>
+                      <div className="cachet-row-meta">
+                        Tabs organize status rows using filter queries. Example: category:infrastructure tag:network
+                      </div>
                     </div>
+                    {tabs.length === 0 ? (
+                      <div className="list-group-item">No tabs configured.</div>
+                    ) : (
+                      tabs.map((tab) => (
+                        <div key={tab.id} className="list-group-item">
+                          <strong>{tab.title}</strong>{" "}
+                          <span className="cachet-row-meta">
+                            {tab.isGlobal ? "global" : "tenant"} · {tab.enabled ? "enabled" : "disabled"}
+                          </span>
+                          <div className="pull-right cachet-row-actions">
+                            <button className="btn btn-link" type="button" onClick={() => handleTabEdit(tab)}>
+                              Edit
+                            </button>
+                            <button className="btn btn-link" type="button" disabled={tabs.length <= 1} onClick={() => void handleTabDelete(tab)}>
+                              Delete
+                            </button>
+                          </div>
+                          <div className="cachet-row-meta">Filter: {tab.filterQuery || "all services"}</div>
+                        </div>
+                      ))
+                    )}
                     <div className="list-group-item">
                       <strong>Status colors</strong>
                       <div className="pull-right">
@@ -1807,6 +2227,67 @@ export function AdminPage() {
             </label>
             <button className="btn btn-success" type="submit">
               {editingTenantId ? "Save tenant" : "Create tenant"}
+            </button>
+          </form>
+        </ModalFrame>
+      )}
+
+      {adminModal === "service" && (
+        <ModalFrame
+          title={editingServiceId ? "Edit service" : "Create service"}
+          description="Services are the status-page rows. Tabs place them by category, topic, tag, service name, or slug filters."
+          onClose={closeAdminModal}
+        >
+          <form className="cachet-form" onSubmit={handleServiceSave}>
+            <div className="cachet-form-grid">
+              <label>
+                Service name
+                <input value={serviceForm.name} onChange={(event) => setServiceForm((current) => ({ ...current, name: event.target.value }))} placeholder="TN Core Network" />
+              </label>
+              <label>
+                URL slug
+                <input value={serviceForm.slug} onChange={(event) => setServiceForm((current) => ({ ...current, slug: event.target.value }))} placeholder="tn-core-network" />
+              </label>
+            </div>
+            <div className="cachet-form-grid">
+              <label>
+                Category
+                <input value={serviceForm.category} onChange={(event) => setServiceForm((current) => ({ ...current, category: event.target.value }))} placeholder="infrastructure" />
+              </label>
+              <label>
+                Topic
+                <input value={serviceForm.topic} onChange={(event) => setServiceForm((current) => ({ ...current, topic: event.target.value }))} placeholder="network" />
+              </label>
+            </div>
+            <label>
+              Tags
+              <input value={serviceForm.tags} onChange={(event) => setServiceForm((current) => ({ ...current, tags: event.target.value }))} placeholder="network, critical" />
+              <span className="field-help">Comma-separated tags. A tab filter like tag:network will include this service.</span>
+            </label>
+            <div className="cachet-form-grid">
+              <label>
+                Source type
+                <select value={serviceForm.sourceType} onChange={(event) => setServiceForm((current) => ({ ...current, sourceType: event.target.value as ServiceDefinition["sourceType"] }))}>
+                  <option value="zabbix">Zabbix</option>
+                  <option value="prometheus">Prometheus</option>
+                  <option value="prtg">PRTG</option>
+                  <option value="webhook">Webhook</option>
+                </select>
+              </label>
+              <label>
+                Source ref
+                <input value={serviceForm.sourceRef} onChange={(event) => setServiceForm((current) => ({ ...current, sourceRef: event.target.value }))} placeholder="zabbix:tn-core-network" />
+              </label>
+            </div>
+            <span className="field-help">
+              Source ref is the join key. For Zabbix, set connector config services to e.g. {"[{ \"ref\": \"zabbix:tn-core-network\", \"summary\": \"TN Core Network\" }]"}.
+            </span>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={serviceForm.enabled} onChange={(event) => setServiceForm((current) => ({ ...current, enabled: event.target.checked }))} />
+              Enabled
+            </label>
+            <button className="btn btn-success" type="submit">
+              {editingServiceId ? "Save service" : "Create service"}
             </button>
           </form>
         </ModalFrame>
@@ -1929,13 +2410,23 @@ export function AdminPage() {
         </ModalFrame>
       )}
 
-      {adminModal === "notification-settings" && (
-        <ModalFrame title="Notification delivery settings" description="Configure outbound Slack and SMTP delivery used by subscriptions and status transitions." onClose={closeAdminModal}>
+      {adminModal === "slack-settings" && (
+        <ModalFrame title="Global Slack webhook" description="Configure the default outbound Slack webhook used for status transition notifications." onClose={closeAdminModal}>
           <form className="cachet-form" onSubmit={handleNotificationSettingsSave}>
             <label>
               Global Slack webhook URL
               <input value={notificationSettingsForm.slackWebhookUrl} onChange={(event) => setNotificationSetting("slackWebhookUrl", event.target.value)} placeholder="https://hooks.slack.com/..." />
             </label>
+            <button className="btn btn-success" type="submit">
+              Save Slack settings
+            </button>
+          </form>
+        </ModalFrame>
+      )}
+
+      {adminModal === "smtp-settings" && (
+        <ModalFrame title="SMTP server" description="Configure outbound email delivery used by email subscriptions and status transitions." onClose={closeAdminModal}>
+          <form className="cachet-form" onSubmit={handleNotificationSettingsSave}>
             <div className="cachet-form-section">
               <h3>SMTP server</h3>
               <label>
@@ -1960,7 +2451,7 @@ export function AdminPage() {
               </label>
             </div>
             <button className="btn btn-success" type="submit">
-              Save notification settings
+              Save SMTP settings
             </button>
           </form>
         </ModalFrame>
@@ -2158,16 +2649,17 @@ export function AdminPage() {
       )}
 
       {adminModal === "branding" && (
-        <ModalFrame title="Edit branding" onClose={closeAdminModal}>
+        <ModalFrame title="Edit branding" description="The logo is displayed at the top of both the public status page and the admin page." onClose={closeAdminModal}>
           <form className="cachet-form" onSubmit={handleBrandingSave}>
             <label>
               Application name
               <input value={branding.appName} onChange={(event) => setBranding((current) => ({ ...current, appName: event.target.value }))} />
             </label>
-            <label>
-              Logo URL
-              <input value={branding.logoUrl} onChange={(event) => setBranding((current) => ({ ...current, logoUrl: event.target.value }))} />
-            </label>
+            <label htmlFor="branding-logo-url">Logo URL</label>
+            <div className="cachet-form-field">
+              <input id="branding-logo-url" value={branding.logoUrl} onChange={(event) => setBranding((current) => ({ ...current, logoUrl: event.target.value }))} />
+              <span className="field-help">Use a reachable image URL for the header logo on the status and admin pages.</span>
+            </div>
             <label>
               Favicon URL
               <input value={branding.faviconUrl} onChange={(event) => setBranding((current) => ({ ...current, faviconUrl: event.target.value }))} />
@@ -2187,22 +2679,29 @@ export function AdminPage() {
       )}
 
       {adminModal === "tab" && (
-        <ModalFrame title="Create tab" onClose={closeAdminModal}>
-          <form className="cachet-form" onSubmit={handleTabCreate}>
+        <ModalFrame title={editingTabId ? "Edit tab" : "Create tab"} description="Tabs group status rows by matching service metadata." onClose={closeAdminModal}>
+          <form className="cachet-form" onSubmit={handleTabSave}>
             <label>
               Title
               <input value={tabForm.title} onChange={(event) => setTabForm((current) => ({ ...current, title: event.target.value }))} />
             </label>
-            <label>
-              Filter query
-              <input value={tabForm.filterQuery} onChange={(event) => setTabForm((current) => ({ ...current, filterQuery: event.target.value }))} placeholder="category:network tag:critical" />
-            </label>
+            <label htmlFor="tab-filter-query">Filter query</label>
+            <div className="cachet-form-field">
+              <input id="tab-filter-query" value={tabForm.filterQuery} onChange={(event) => setTabForm((current) => ({ ...current, filterQuery: event.target.value }))} placeholder="category:network tag:critical" />
+              <span className="field-help">
+                Selects which services appear in this tab. Supported tokens: category:value, tag:value, topic:value, service:value. Multiple tokens are ANDed; blank means all services.
+              </span>
+            </div>
             <label className="checkbox-row">
               <input type="checkbox" checked={tabForm.isGlobal} onChange={(event) => setTabForm((current) => ({ ...current, isGlobal: event.target.checked }))} />
               Global tab
             </label>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={tabForm.enabled} onChange={(event) => setTabForm((current) => ({ ...current, enabled: event.target.checked }))} />
+              Enabled
+            </label>
             <button className="btn btn-success" type="submit">
-              Create tab
+              {editingTabId ? "Save tab" : "Create tab"}
             </button>
           </form>
         </ModalFrame>

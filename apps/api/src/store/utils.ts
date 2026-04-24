@@ -30,6 +30,33 @@ export function mergeSummaryStatus(current: StatusLevel, next: StatusLevel): Sta
   return worstStatus([current, next]);
 }
 
+export function statusRank(status: StatusLevel): number {
+  switch (status) {
+    case "healthy":
+      return 0;
+    case "degraded":
+      return 1;
+    case "maintenance":
+      return 2;
+    case "down":
+      return 3;
+    default:
+      return 4;
+  }
+}
+
+export function severityTrend(previous: StatusLevel, next: StatusLevel): "improved" | "worse" | "unchanged" {
+  const previousRank = statusRank(previous);
+  const nextRank = statusRank(next);
+  if (nextRank < previousRank) {
+    return "improved";
+  }
+  if (nextRank > previousRank) {
+    return "worse";
+  }
+  return "unchanged";
+}
+
 export function snapshotHash(snapshot: Snapshot): string {
   return JSON.stringify({
     tenantId: snapshot.tenantId,

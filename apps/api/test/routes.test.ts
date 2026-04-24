@@ -435,7 +435,7 @@ test("main admin can configure authentication providers and SMTP settings", asyn
   }
 });
 
-test("admin CRUD routes manage connectors, tabs, banners, subscriptions, branding, colors, and summaries", async () => {
+test("admin CRUD routes manage services, connectors, tabs, banners, subscriptions, branding, colors, and summaries", async () => {
   const { app } = await buildRouteApp();
   try {
     const cookieHeader = await loginAsAdmin(app);
@@ -468,6 +468,43 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
       }
     });
     assert.equal(tenantPatch.statusCode, 200);
+
+    const serviceCreate = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/services",
+      headers: {
+        cookie: cookieHeader
+      },
+      payload: {
+        tenantSlug: "primary-site",
+        name: "TN Core Network",
+        slug: "tn-core-network",
+        category: "infrastructure",
+        topic: "network",
+        tags: ["network", "critical"],
+        sourceType: "zabbix",
+        sourceRef: "zabbix:tn-core-network",
+        enabled: true
+      }
+    });
+    assert.equal(serviceCreate.statusCode, 201);
+    const service = serviceCreate.json() as { id: string; category: string; sourceRef: string };
+    assert.equal(service.category, "infrastructure");
+    assert.equal(service.sourceRef, "zabbix:tn-core-network");
+
+    const servicePatch = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/admin/services/${service.id}`,
+      headers: {
+        cookie: cookieHeader
+      },
+      payload: {
+        topic: "core-network",
+        tags: "network, core"
+      }
+    });
+    assert.equal(servicePatch.statusCode, 200);
+    assert.deepEqual((servicePatch.json() as { tags: string[] }).tags, ["network", "core"]);
 
     const connectorCreate = await app.inject({
       method: "POST",
@@ -543,6 +580,23 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
       }
     });
     assert.equal(tabCreate.statusCode, 201);
+    const tab = tabCreate.json() as { id: string; title: string; filterQuery: string };
+
+    const tabPatch = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/admin/tabs/${tab.id}`,
+      headers: {
+        cookie: cookieHeader
+      },
+      payload: {
+        title: "Critical network",
+        filterQuery: "category:network tag:critical",
+        enabled: false
+      }
+    });
+    assert.equal(tabPatch.statusCode, 200);
+    assert.equal((tabPatch.json() as { title: string; filterQuery: string; enabled: boolean }).title, "Critical network");
+    assert.equal((tabPatch.json() as { filterQuery: string }).filterQuery, "category:network tag:critical");
 
     const bannerCreate = await app.inject({
       method: "POST",
@@ -560,7 +614,9 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
       }
     });
     assert.equal(bannerCreate.statusCode, 201);
-    const banner = bannerCreate.json() as { id: string; active: boolean };
+    const banner = bannerCreate.json() as { id: string; active: boolean; updatedAt: string | null; severityTrend: string | null };
+    assert.equal(typeof banner.updatedAt, "string");
+    assert.equal(banner.severityTrend, null);
 
     const bannerToggle = await app.inject({
       method: "POST",
@@ -570,7 +626,8 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
       }
     });
     assert.equal(bannerToggle.statusCode, 200);
-    assert.equal((bannerToggle.json() as { active: boolean }).active, false);
+    assert.equal((bannerToggle.json() as { active: boolean; severityTrend: string }).active, false);
+    assert.equal((bannerToggle.json() as { severityTrend: string }).severityTrend, "unchanged");
 
     const bannerPatch = await app.inject({
       method: "PATCH",
@@ -586,6 +643,7 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
     });
     assert.equal(bannerPatch.statusCode, 200);
     assert.equal((bannerPatch.json() as { message: string; severity: string; active: boolean }).severity, "healthy");
+    assert.equal((bannerPatch.json() as { severityTrend: string }).severityTrend, "improved");
 
     const subscriptionCreate = await app.inject({
       method: "POST",
@@ -644,9 +702,10 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
     });
     assert.equal(colorsUpdate.statusCode, 200);
 
-    const [tenants, tabs, banners, subscriptions, branding, colors, bootstrap, summary, collectionHealth] = await Promise.all([
+    const [tenants, tabs, services, banners, subscriptions, branding, colors, bootstrap, summary, collectionHealth] = await Promise.all([
       app.inject({ method: "GET", url: "/api/v1/admin/tenants", headers: { cookie: cookieHeader } }),
       app.inject({ method: "GET", url: "/api/v1/admin/tabs?tenant=primary-site", headers: { cookie: cookieHeader } }),
+      app.inject({ method: "GET", url: "/api/v1/admin/services?tenant=primary-site", headers: { cookie: cookieHeader } }),
       app.inject({ method: "GET", url: "/api/v1/admin/banners?tenant=primary-site", headers: { cookie: cookieHeader } }),
       app.inject({ method: "GET", url: "/api/v1/admin/subscriptions?tenant=primary-site", headers: { cookie: cookieHeader } }),
       app.inject({ method: "GET", url: "/api/v1/admin/branding", headers: { cookie: cookieHeader } }),
@@ -658,6 +717,7 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
 
     assert.equal(tenants.statusCode, 200);
     assert.equal(tabs.statusCode, 200);
+    assert.equal(services.statusCode, 200);
     assert.equal(banners.statusCode, 200);
     assert.equal(subscriptions.statusCode, 200);
     assert.equal(branding.statusCode, 200);
@@ -666,6 +726,15 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
     assert.equal(summary.statusCode, 200);
     assert.equal(collectionHealth.statusCode, 200);
     assert.equal((bootstrap.json() as { connectorCount: number }).connectorCount > 0, true);
+
+    const tabDelete = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/admin/tabs/${tab.id}`,
+      headers: {
+        cookie: cookieHeader
+      }
+    });
+    assert.equal(tabDelete.statusCode, 200);
 
     const bannerDelete = await app.inject({
       method: "DELETE",
@@ -684,6 +753,15 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
       }
     });
     assert.equal(connectorDelete.statusCode, 200);
+
+    const serviceDelete = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/admin/services/${service.id}`,
+      headers: {
+        cookie: cookieHeader
+      }
+    });
+    assert.equal(serviceDelete.statusCode, 200);
 
     const tenantDelete = await app.inject({
       method: "DELETE",

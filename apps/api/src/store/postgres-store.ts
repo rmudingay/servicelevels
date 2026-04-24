@@ -12,6 +12,7 @@ import type {
   MaintenanceWindow,
   NotificationSubscription,
   PlatformSettings,
+  ServiceDailySummary,
   Snapshot,
   StatusDailySummary,
   StatusLevel,
@@ -24,7 +25,7 @@ import { clonePlatformSettings, normalizePlatformSettings, platformSettingsFromC
 import { nowIso, slugify } from "../utils.js";
 import { buildSeedState, type SeedState } from "./seed.js";
 import { runMigrations } from "./migrations.js";
-import { mergeSummaryStatus, splitUtcIntervalByDay, utcDayKey, worstStatus } from "./utils.js";
+import { mergeSummaryStatus, severityTrend, splitUtcIntervalByDay, utcDayKey, worstStatus } from "./utils.js";
 import type { StatusRepository } from "./types.js";
 
 type RawRow = Record<string, unknown>;
@@ -127,6 +128,8 @@ function mapBanner(row: RawRow): Banner {
     severity: String(row.severity) as Banner["severity"],
     startsAt: row.starts_at ? new Date(String(row.starts_at)).toISOString() : null,
     endsAt: row.ends_at ? new Date(String(row.ends_at)).toISOString() : null,
+    updatedAt: row.updated_at ? new Date(String(row.updated_at)).toISOString() : null,
+    severityTrend: row.severity_trend ? (String(row.severity_trend) as Banner["severityTrend"]) : null,
     active: toBoolean(row.active)
   };
 }
@@ -222,6 +225,31 @@ function cloneSecondsByStatus(seconds: Record<StatusLevel, number>): Record<Stat
   };
 }
 
+function normalizeServiceDailySummaries(value: unknown): ServiceDailySummary[] {
+  return parseJson<ServiceDailySummary[]>(value, []).map((entry) => ({
+    tenantId: entry.tenantId,
+    serviceId: entry.serviceId,
+    day: entry.day,
+    overallStatus: entry.overallStatus,
+    secondsByStatus: cloneSecondsByStatus(entry.secondsByStatus),
+    firstCollectedAt: new Date(entry.firstCollectedAt).toISOString(),
+    lastCollectedAt: new Date(entry.lastCollectedAt).toISOString(),
+    sampleCount: Number(entry.sampleCount ?? 0),
+    latestSummary: entry.latestSummary ?? ""
+  }));
+}
+
+function cloneDailySummary(summary: StatusDailySummary): StatusDailySummary {
+  return {
+    ...summary,
+    secondsByStatus: cloneSecondsByStatus(summary.secondsByStatus),
+    serviceSummaries: (summary.serviceSummaries ?? []).map((entry) => ({
+      ...entry,
+      secondsByStatus: cloneSecondsByStatus(entry.secondsByStatus)
+    }))
+  };
+}
+
 function mapDailySummary(row: RawRow): StatusDailySummary {
   return {
     tenantId: String(row.tenant_id),
@@ -230,7 +258,8 @@ function mapDailySummary(row: RawRow): StatusDailySummary {
     secondsByStatus: cloneSecondsByStatus(parseJson<Record<StatusLevel, number>>(row.seconds_by_status, emptySecondsByStatus())),
     firstCollectedAt: new Date(String(row.first_collected_at)).toISOString(),
     lastCollectedAt: new Date(String(row.last_collected_at)).toISOString(),
-    sampleCount: Number(row.sample_count ?? 0)
+    sampleCount: Number(row.sample_count ?? 0),
+    serviceSummaries: normalizeServiceDailySummaries(row.service_summaries)
   };
 }
 
@@ -242,8 +271,44 @@ function createEmptyDailySummary(tenantId: string, day: string, observedAt: stri
     secondsByStatus: emptySecondsByStatus(),
     firstCollectedAt: observedAt,
     lastCollectedAt: observedAt,
-    sampleCount: 0
+    sampleCount: 0,
+    serviceSummaries: []
   };
+}
+
+function createServiceDailySummary(
+  tenantId: string,
+  serviceId: string,
+  day: string,
+  observedAt: string,
+  latestSummary = "Status unavailable"
+): ServiceDailySummary {
+  return {
+    tenantId,
+    serviceId,
+    day,
+    overallStatus: "unknown",
+    secondsByStatus: emptySecondsByStatus(),
+    firstCollectedAt: observedAt,
+    lastCollectedAt: observedAt,
+    sampleCount: 0,
+    latestSummary
+  };
+}
+
+function ensureServiceDailySummary(
+  summary: StatusDailySummary,
+  serviceId: string,
+  observedAt: string,
+  latestSummary = "Status unavailable"
+): ServiceDailySummary {
+  const existing = summary.serviceSummaries.find((entry) => entry.serviceId === serviceId);
+  if (existing) {
+    return existing;
+  }
+  const serviceSummary = createServiceDailySummary(summary.tenantId, serviceId, summary.day, observedAt, latestSummary);
+  summary.serviceSummaries = [...summary.serviceSummaries, serviceSummary];
+  return serviceSummary;
 }
 
 function defaultColorsForTenant(tenantId: string): ColorMapping[] {
@@ -269,19 +334,47 @@ function addDuration(summary: StatusDailySummary, status: StatusLevel, seconds: 
   summary.lastCollectedAt = observedAt > summary.lastCollectedAt ? observedAt : summary.lastCollectedAt;
 }
 
+function addServiceObservation(summary: StatusDailySummary, service: Snapshot["services"][number], observedAt: string): void {
+  const serviceSummary = ensureServiceDailySummary(summary, service.serviceId, observedAt, service.summary);
+  serviceSummary.overallStatus = mergeSummaryStatus(serviceSummary.overallStatus, service.status);
+  serviceSummary.latestSummary = service.summary;
+  serviceSummary.sampleCount += 1;
+  serviceSummary.firstCollectedAt = serviceSummary.sampleCount === 1 || observedAt < serviceSummary.firstCollectedAt ? observedAt : serviceSummary.firstCollectedAt;
+  serviceSummary.lastCollectedAt = observedAt > serviceSummary.lastCollectedAt ? observedAt : serviceSummary.lastCollectedAt;
+}
+
+function addServiceDuration(
+  summary: StatusDailySummary,
+  service: Snapshot["services"][number],
+  seconds: number,
+  observedAt: string
+): void {
+  const serviceSummary = ensureServiceDailySummary(summary, service.serviceId, observedAt, service.summary);
+  serviceSummary.secondsByStatus[service.status] = (serviceSummary.secondsByStatus[service.status] ?? 0) + seconds;
+  serviceSummary.overallStatus = mergeSummaryStatus(serviceSummary.overallStatus, service.status);
+  serviceSummary.latestSummary = service.summary;
+  serviceSummary.lastCollectedAt = serviceSummary.lastCollectedAt > observedAt ? serviceSummary.lastCollectedAt : observedAt;
+}
+
 function buildUpdatedDailySummaries(previous: Snapshot | null, current: Snapshot, existing: StatusDailySummary[]): StatusDailySummary[] {
   const summaries = new Map<string, StatusDailySummary>(
-    existing.map((entry) => [entry.day, { ...entry, secondsByStatus: cloneSecondsByStatus(entry.secondsByStatus) }])
+    existing.map((entry) => [entry.day, cloneDailySummary(entry)])
   );
   const currentDay = utcDayKey(current.collectedAt);
   const currentSummary = summaries.get(currentDay) ?? createEmptyDailySummary(current.tenantId, currentDay, current.collectedAt);
   addObservation(currentSummary, current.overallStatus, current.collectedAt);
+  for (const service of current.services) {
+    addServiceObservation(currentSummary, service, current.collectedAt);
+  }
   summaries.set(currentDay, currentSummary);
 
   if (previous) {
     for (const segment of splitUtcIntervalByDay(previous.collectedAt, current.collectedAt)) {
       const summary = summaries.get(segment.day) ?? createEmptyDailySummary(current.tenantId, segment.day, segment.segmentStart);
       addDuration(summary, previous.overallStatus, segment.seconds, segment.segmentEnd);
+      for (const service of previous.services) {
+        addServiceDuration(summary, service, segment.seconds, segment.segmentEnd);
+      }
       summary.firstCollectedAt = segment.segmentStart < summary.firstCollectedAt ? segment.segmentStart : summary.firstCollectedAt;
       summary.lastCollectedAt = segment.segmentEnd > summary.lastCollectedAt ? segment.segmentEnd : summary.lastCollectedAt;
       summaries.set(segment.day, summary);
@@ -384,7 +477,7 @@ export class PostgresStore implements StatusRepository {
     const state = await this.freshState();
     return state.dailySummaries
       .filter((entry) => !tenantId || entry.tenantId === tenantId)
-      .map((entry) => ({ ...entry, secondsByStatus: cloneSecondsByStatus(entry.secondsByStatus) }))
+      .map(cloneDailySummary)
       .sort((left, right) => right.day.localeCompare(left.day));
   }
 
@@ -413,7 +506,7 @@ export class PostgresStore implements StatusRepository {
       dailySummaries: tenant
         ? state.dailySummaries
             .filter((entry) => entry.tenantId === tenant.id)
-            .map((entry) => ({ ...entry, secondsByStatus: cloneSecondsByStatus(entry.secondsByStatus) }))
+            .map(cloneDailySummary)
             .sort((left, right) => right.day.localeCompare(left.day))
         : []
     };
@@ -646,6 +739,67 @@ export class PostgresStore implements StatusRepository {
     return (result.rowCount ?? 0) > 0;
   }
 
+  async createService(tenantId: string, input: Omit<ServiceDefinition, "id" | "tenantId">): Promise<ServiceDefinition> {
+    const service: ServiceDefinition = {
+      ...input,
+      id: `service-${slugify(input.slug || input.name)}-${Date.now()}`,
+      tenantId,
+      slug: slugify(input.slug || input.name)
+    };
+    await this.pool.query(
+      "INSERT INTO services (id, tenant_id, name, slug, category, topic, tags, source_type, source_ref, enabled) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10)",
+      [
+        service.id,
+        tenantId,
+        service.name,
+        service.slug,
+        service.category,
+        service.topic,
+        JSON.stringify(service.tags),
+        service.sourceType,
+        service.sourceRef,
+        service.enabled
+      ]
+    );
+    await this.loadState();
+    return service;
+  }
+
+  async updateService(serviceId: string, patch: Partial<Omit<ServiceDefinition, "id" | "tenantId">>): Promise<ServiceDefinition | null> {
+    this.ensureState();
+    const current = this.state!.services.find((service) => service.id === serviceId);
+    if (!current) {
+      return null;
+    }
+    const next: ServiceDefinition = {
+      ...current,
+      ...patch,
+      slug: patch.slug !== undefined ? slugify(patch.slug) : current.slug
+    };
+    const result = await this.pool.query(
+      "UPDATE services SET name = $1, slug = $2, category = $3, topic = $4, tags = $5::jsonb, source_type = $6, source_ref = $7, enabled = $8 WHERE id = $9 RETURNING *",
+      [
+        next.name,
+        next.slug,
+        next.category,
+        next.topic,
+        JSON.stringify(next.tags),
+        next.sourceType,
+        next.sourceRef,
+        next.enabled,
+        serviceId
+      ]
+    );
+    await this.loadState();
+    return result.rows[0] ? mapService(result.rows[0]) : null;
+  }
+
+  async deleteService(serviceId: string): Promise<boolean> {
+    const result = await this.pool.query("DELETE FROM services WHERE id = $1", [serviceId]);
+    await this.loadState();
+    return (result.rowCount ?? 0) > 0;
+  }
+
   async createSubscription(tenantId: string, input: Omit<NotificationSubscription, "id" | "tenantId">): Promise<NotificationSubscription> {
     const subscription: NotificationSubscription = {
       ...input,
@@ -730,15 +884,33 @@ export class PostgresStore implements StatusRepository {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async createBanner(tenantId: string, input: Omit<Banner, "id" | "tenantId">): Promise<Banner> {
+  async createBanner(
+    tenantId: string,
+    input: Omit<Banner, "id" | "tenantId" | "updatedAt" | "severityTrend"> & Partial<Pick<Banner, "updatedAt" | "severityTrend">>
+  ): Promise<Banner> {
     const banner: Banner = {
       ...input,
       id: `banner-${slugify(input.title)}-${Date.now()}`,
-      tenantId
+      tenantId,
+      updatedAt: input.updatedAt ?? nowIso(),
+      severityTrend: input.severityTrend ?? null
     };
     await this.pool.query(
-      "INSERT INTO banners (id, tenant_id, scope_type, scope_ref, title, message, severity, starts_at, ends_at, active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
-      [banner.id, tenantId, banner.scopeType, banner.scopeRef, banner.title, banner.message, banner.severity, banner.startsAt, banner.endsAt, banner.active]
+      "INSERT INTO banners (id, tenant_id, scope_type, scope_ref, title, message, severity, starts_at, ends_at, updated_at, severity_trend, active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+      [
+        banner.id,
+        tenantId,
+        banner.scopeType,
+        banner.scopeRef,
+        banner.title,
+        banner.message,
+        banner.severity,
+        banner.startsAt,
+        banner.endsAt,
+        banner.updatedAt,
+        banner.severityTrend,
+        banner.active
+      ]
     );
     await this.loadState();
     return banner;
@@ -806,10 +978,28 @@ export class PostgresStore implements StatusRepository {
     if (!current) {
       return null;
     }
-    const next = { ...current, ...patch };
+    const nextSeverity = patch.severity ?? current.severity;
+    const next = {
+      ...current,
+      ...patch,
+      updatedAt: nowIso(),
+      severityTrend: patch.severity ? severityTrend(current.severity, nextSeverity) : "unchanged"
+    };
     await this.pool.query(
-      "UPDATE banners SET scope_type = $1, scope_ref = $2, title = $3, message = $4, severity = $5, starts_at = $6, ends_at = $7, active = $8 WHERE id = $9",
-      [next.scopeType, next.scopeRef, next.title, next.message, next.severity, next.startsAt, next.endsAt, next.active, bannerId]
+      "UPDATE banners SET scope_type = $1, scope_ref = $2, title = $3, message = $4, severity = $5, starts_at = $6, ends_at = $7, active = $8, updated_at = $9, severity_trend = $10 WHERE id = $11",
+      [
+        next.scopeType,
+        next.scopeRef,
+        next.title,
+        next.message,
+        next.severity,
+        next.startsAt,
+        next.endsAt,
+        next.active,
+        next.updatedAt,
+        next.severityTrend,
+        bannerId
+      ]
     );
     await this.loadState();
     return next;
@@ -842,6 +1032,27 @@ export class PostgresStore implements StatusRepository {
     );
     await this.loadState();
     return tab;
+  }
+
+  async updateTab(tabId: string, patch: Partial<Omit<TabDefinition, "id" | "tenantId">>): Promise<TabDefinition | null> {
+    this.ensureState();
+    const current = this.state!.tabs.find((tab) => tab.id === tabId);
+    if (!current) {
+      return null;
+    }
+    const next = { ...current, ...patch };
+    await this.pool.query(
+      "UPDATE tabs SET title = $1, slug = $2, sort_order = $3, filter_query = $4, is_global = $5, enabled = $6 WHERE id = $7",
+      [next.title, next.slug, next.sortOrder, next.filterQuery, next.isGlobal, next.enabled, tabId]
+    );
+    await this.loadState();
+    return next;
+  }
+
+  async deleteTab(tabId: string): Promise<boolean> {
+    const result = await this.pool.query("DELETE FROM tabs WHERE id = $1", [tabId]);
+    await this.loadState();
+    return (result.rowCount ?? 0) > 0;
   }
 
   async updateTabs(tabs: TabDefinition[]): Promise<TabDefinition[]> {
@@ -881,7 +1092,7 @@ export class PostgresStore implements StatusRepository {
       await client.query("DELETE FROM daily_status_summaries WHERE tenant_id = $1", [snapshot.tenantId]);
       for (const summary of updatedSummaries) {
         await client.query(
-          "INSERT INTO daily_status_summaries (tenant_id, day, overall_status, seconds_by_status, first_collected_at, last_collected_at, sample_count) VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7)",
+          "INSERT INTO daily_status_summaries (tenant_id, day, overall_status, seconds_by_status, first_collected_at, last_collected_at, sample_count, service_summaries) VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8::jsonb)",
           [
             summary.tenantId,
             summary.day,
@@ -889,7 +1100,8 @@ export class PostgresStore implements StatusRepository {
             JSON.stringify(summary.secondsByStatus),
             summary.firstCollectedAt,
             summary.lastCollectedAt,
-            summary.sampleCount
+            summary.sampleCount,
+            JSON.stringify(summary.serviceSummaries)
           ]
         );
       }
@@ -937,8 +1149,13 @@ export class PostgresStore implements StatusRepository {
 
   private async normalizeLegacySnapshotData(): Promise<void> {
     const summaryCount = await this.pool.query("SELECT count(*)::int AS count FROM daily_status_summaries");
-    const shouldRebuildSummaries = Number(summaryCount.rows[0]?.count ?? 0) === 0;
+    const serviceSummaryCount = await this.pool.query(
+      "SELECT count(*)::int AS count FROM daily_status_summaries WHERE jsonb_array_length(service_summaries) > 0"
+    );
     const snapshotRows = await this.pool.query("SELECT * FROM snapshots ORDER BY tenant_id, collected_at");
+    const shouldRebuildSummaries =
+      Number(summaryCount.rows[0]?.count ?? 0) === 0 ||
+      (snapshotRows.rows.length > 0 && Number(serviceSummaryCount.rows[0]?.count ?? 0) === 0);
 
     await this.pool.query(`
       DELETE FROM snapshots
@@ -970,6 +1187,9 @@ export class PostgresStore implements StatusRepository {
         const currentKey = `${snapshot.tenantId}:${day}`;
         const currentSummary = summaries.get(currentKey) ?? createEmptyDailySummary(snapshot.tenantId, day, snapshot.collectedAt);
         addObservation(currentSummary, snapshot.overallStatus, snapshot.collectedAt);
+        for (const service of snapshot.services) {
+          addServiceObservation(currentSummary, service, snapshot.collectedAt);
+        }
         summaries.set(currentKey, currentSummary);
 
         if (previous) {
@@ -977,6 +1197,9 @@ export class PostgresStore implements StatusRepository {
             const segmentKey = `${snapshot.tenantId}:${segment.day}`;
             const summary = summaries.get(segmentKey) ?? createEmptyDailySummary(snapshot.tenantId, segment.day, segment.segmentStart);
             addDuration(summary, previous.overallStatus, segment.seconds, segment.segmentEnd);
+            for (const service of previous.services) {
+              addServiceDuration(summary, service, segment.seconds, segment.segmentEnd);
+            }
             summary.firstCollectedAt = segment.segmentStart < summary.firstCollectedAt ? segment.segmentStart : summary.firstCollectedAt;
             summary.lastCollectedAt = segment.segmentEnd > summary.lastCollectedAt ? segment.segmentEnd : summary.lastCollectedAt;
             summaries.set(segmentKey, summary);
@@ -989,7 +1212,7 @@ export class PostgresStore implements StatusRepository {
 
     for (const summary of summaries.values()) {
       await this.pool.query(
-        "INSERT INTO daily_status_summaries (tenant_id, day, overall_status, seconds_by_status, first_collected_at, last_collected_at, sample_count) VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7) ON CONFLICT (tenant_id, day) DO UPDATE SET overall_status = EXCLUDED.overall_status, seconds_by_status = EXCLUDED.seconds_by_status, first_collected_at = EXCLUDED.first_collected_at, last_collected_at = EXCLUDED.last_collected_at, sample_count = EXCLUDED.sample_count",
+        "INSERT INTO daily_status_summaries (tenant_id, day, overall_status, seconds_by_status, first_collected_at, last_collected_at, sample_count, service_summaries) VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8::jsonb) ON CONFLICT (tenant_id, day) DO UPDATE SET overall_status = EXCLUDED.overall_status, seconds_by_status = EXCLUDED.seconds_by_status, first_collected_at = EXCLUDED.first_collected_at, last_collected_at = EXCLUDED.last_collected_at, sample_count = EXCLUDED.sample_count, service_summaries = EXCLUDED.service_summaries",
         [
           summary.tenantId,
           summary.day,
@@ -997,7 +1220,8 @@ export class PostgresStore implements StatusRepository {
           JSON.stringify(summary.secondsByStatus),
           summary.firstCollectedAt,
           summary.lastCollectedAt,
-          summary.sampleCount
+          summary.sampleCount,
+          JSON.stringify(summary.serviceSummaries)
         ]
       );
     }
@@ -1066,8 +1290,21 @@ export class PostgresStore implements StatusRepository {
 
       for (const banner of seed.banners) {
         await client.query(
-          "INSERT INTO banners (id, tenant_id, scope_type, scope_ref, title, message, severity, starts_at, ends_at, active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
-          [banner.id, banner.tenantId, banner.scopeType, banner.scopeRef, banner.title, banner.message, banner.severity, banner.startsAt, banner.endsAt, banner.active]
+          "INSERT INTO banners (id, tenant_id, scope_type, scope_ref, title, message, severity, starts_at, ends_at, updated_at, severity_trend, active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+          [
+            banner.id,
+            banner.tenantId,
+            banner.scopeType,
+            banner.scopeRef,
+            banner.title,
+            banner.message,
+            banner.severity,
+            banner.startsAt,
+            banner.endsAt,
+            banner.updatedAt,
+            banner.severityTrend,
+            banner.active
+          ]
         );
       }
 
@@ -1125,16 +1362,18 @@ export class PostgresStore implements StatusRepository {
           [snapshot.id, snapshot.tenantId, snapshot.collectedAt, snapshot.overallStatus, JSON.stringify(snapshot.services), JSON.stringify(snapshot.rawPayload)]
         );
         const day = utcDayKey(snapshot.collectedAt);
+        const summary = seed.dailySummaries.find((entry) => entry.tenantId === snapshot.tenantId && entry.day === day);
         await client.query(
-          "INSERT INTO daily_status_summaries (tenant_id, day, overall_status, seconds_by_status, first_collected_at, last_collected_at, sample_count) VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7)",
+          "INSERT INTO daily_status_summaries (tenant_id, day, overall_status, seconds_by_status, first_collected_at, last_collected_at, sample_count, service_summaries) VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8::jsonb)",
           [
             snapshot.tenantId,
             day,
             snapshot.overallStatus,
-            JSON.stringify(emptySecondsByStatus()),
+            JSON.stringify(summary?.secondsByStatus ?? emptySecondsByStatus()),
             snapshot.collectedAt,
             snapshot.collectedAt,
-            1
+            summary?.sampleCount ?? 1,
+            JSON.stringify(summary?.serviceSummaries ?? [])
           ]
         );
       }

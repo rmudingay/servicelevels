@@ -13,13 +13,13 @@ async function createTestSchema(pool: Pool, config: ReturnType<typeof loadConfig
     "CREATE TABLE tabs (id text PRIMARY KEY, tenant_id text, title text, slug text, sort_order integer, filter_query text, is_global boolean, enabled boolean)",
     "CREATE TABLE services (id text PRIMARY KEY, tenant_id text, name text, slug text, category text, topic text, tags jsonb, source_type text, source_ref text, enabled boolean)",
     "CREATE TABLE connectors (id text PRIMARY KEY, tenant_id text, type text, name text, config_json jsonb, auth_json jsonb, enabled boolean, poll_interval_seconds integer, last_success_at timestamptz, last_error_at timestamptz, last_error_message text)",
-    "CREATE TABLE banners (id text PRIMARY KEY, tenant_id text, scope_type text, scope_ref text, title text, message text, severity text, starts_at timestamptz, ends_at timestamptz, active boolean)",
+    "CREATE TABLE banners (id text PRIMARY KEY, tenant_id text, scope_type text, scope_ref text, title text, message text, severity text, starts_at timestamptz, ends_at timestamptz, updated_at timestamptz, severity_trend text, active boolean)",
     "CREATE TABLE incidents (id text PRIMARY KEY, tenant_id text, service_id text, title text, description text, status text, opened_at timestamptz, resolved_at timestamptz, source_type text)",
     "CREATE TABLE maintenance_windows (id text PRIMARY KEY, tenant_id text, service_id text, title text, description text, starts_at timestamptz, ends_at timestamptz, status text, created_by text)",
     "CREATE TABLE subscriptions (id text PRIMARY KEY, tenant_id text, service_id text, channel_type text, target text, enabled boolean)",
     "CREATE TABLE colors (tenant_id text, status_key text, color_hex text, label text, PRIMARY KEY (tenant_id, status_key))",
     "CREATE TABLE snapshots (id text PRIMARY KEY, tenant_id text UNIQUE, collected_at timestamptz, overall_status text, services jsonb, raw_payload jsonb)",
-    "CREATE TABLE daily_status_summaries (tenant_id text, day text, overall_status text, seconds_by_status jsonb, first_collected_at timestamptz, last_collected_at timestamptz, sample_count integer, PRIMARY KEY (tenant_id, day))",
+    "CREATE TABLE daily_status_summaries (tenant_id text, day text, overall_status text, seconds_by_status jsonb, first_collected_at timestamptz, last_collected_at timestamptz, sample_count integer, service_summaries jsonb, PRIMARY KEY (tenant_id, day))",
     "CREATE TABLE users (id text PRIMARY KEY, username text, display_name text, email text, auth_type text, is_admin boolean, enabled boolean, password_hash text)"
   ];
 
@@ -90,6 +90,7 @@ test("PostgresStore persists connectors, latest snapshots, and daily summaries",
     assert.equal(latest?.id, "snapshot-integration");
     assert.equal(latest?.overallStatus, "degraded");
     assert.equal(summaries.some((entry) => entry.day === "2026-04-20" && entry.overallStatus === "degraded"), true);
+    assert.equal(summaries.some((entry) => entry.serviceSummaries.some((service) => service.serviceId === "svc-prom" && service.overallStatus === "degraded")), true);
 
     const updated = await reopened.updateConnector(connector.id, {
       lastSuccessAt: "2026-04-20T10:05:00.000Z",

@@ -9,6 +9,7 @@ import type {
   MaintenanceWindow,
   NotificationSubscription,
   PlatformSettings,
+  ServiceDefinition,
   StatusView,
   TabDefinition,
   Tenant,
@@ -65,6 +66,7 @@ export const api = {
   tenants: () => fetchJson<Tenant[]>("/api/v1/admin/tenants"),
   users: () => fetchJson<AdminUser[]>("/api/v1/admin/users"),
   tabs: (tenant?: string) => fetchJson<TabDefinition[]>(`/api/v1/admin/tabs${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`),
+  services: (tenant?: string) => fetchJson<ServiceDefinition[]>(`/api/v1/admin/services${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`),
   banners: (tenant?: string) => fetchJson<Banner[]>(`/api/v1/admin/banners${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`),
   incidents: (tenant?: string) => fetchJson<Incident[]>(`/api/v1/admin/incidents${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`),
   maintenance: (tenant?: string) => fetchJson<MaintenanceWindow[]>(`/api/v1/admin/maintenance${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`),
@@ -112,6 +114,39 @@ export const api = {
     fetchJson<TabDefinition>("/api/v1/admin/tabs", {
       method: "POST",
       body: JSON.stringify(body)
+    }),
+  updateTab: (id: string, body: Partial<Pick<TabDefinition, "title" | "filterQuery" | "isGlobal" | "enabled" | "sortOrder">>) =>
+    fetchJson<TabDefinition | null>(`/api/v1/admin/tabs/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body)
+    }),
+  deleteTab: (id: string) =>
+    fetchJson<{ ok: boolean }>(`/api/v1/admin/tabs/${id}`, {
+      method: "DELETE"
+    }),
+  createService: (body: {
+    tenantSlug: string;
+    name: string;
+    slug: string;
+    category: string;
+    topic: string;
+    tags: string[];
+    sourceType: ServiceDefinition["sourceType"];
+    sourceRef: string;
+    enabled: boolean;
+  }) =>
+    fetchJson<ServiceDefinition>("/api/v1/admin/services", {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
+  updateService: (id: string, body: Partial<Omit<ServiceDefinition, "id" | "tenantId">>) =>
+    fetchJson<ServiceDefinition | null>(`/api/v1/admin/services/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body)
+    }),
+  deleteService: (id: string) =>
+    fetchJson<{ ok: boolean }>(`/api/v1/admin/services/${id}`, {
+      method: "DELETE"
     }),
   createConnector: (body: {
     tenantSlug: string;

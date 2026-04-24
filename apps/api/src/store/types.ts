@@ -25,6 +25,9 @@ export interface StatusRepository {
   getTenants(): Promise<Tenant[]>;
   getTabs(tenantId?: string): Promise<TabDefinition[]>;
   getServices(tenantId?: string): Promise<ServiceDefinition[]>;
+  createService(tenantId: string, input: Omit<ServiceDefinition, "id" | "tenantId">): Promise<ServiceDefinition>;
+  updateService(serviceId: string, patch: Partial<Omit<ServiceDefinition, "id" | "tenantId">>): Promise<ServiceDefinition | null>;
+  deleteService(serviceId: string): Promise<boolean>;
   getConnectors(tenantId?: string): Promise<IntegrationConnector[]>;
   getBanners(tenantId?: string): Promise<Banner[]>;
   getIncidents(tenantId?: string): Promise<Incident[]>;
@@ -55,7 +58,10 @@ export interface StatusRepository {
   createConnector(tenantId: string, input: Omit<IntegrationConnector, "id" | "tenantId" | "lastSuccessAt" | "lastErrorAt" | "lastErrorMessage">): Promise<IntegrationConnector>;
   updateConnector(connectorId: string, patch: Partial<IntegrationConnector>): Promise<IntegrationConnector | null>;
   deleteConnector(connectorId: string): Promise<boolean>;
-  createBanner(tenantId: string, input: Omit<Banner, "id" | "tenantId">): Promise<Banner>;
+  createBanner(
+    tenantId: string,
+    input: Omit<Banner, "id" | "tenantId" | "updatedAt" | "severityTrend"> & Partial<Pick<Banner, "updatedAt" | "severityTrend">>
+  ): Promise<Banner>;
   updateBanner(bannerId: string, patch: Partial<Banner>): Promise<Banner | null>;
   deleteBanner(bannerId: string): Promise<boolean>;
   toggleBanner(bannerId: string): Promise<Banner | null>;
@@ -64,6 +70,8 @@ export interface StatusRepository {
   createMaintenanceWindow(tenantId: string, input: Omit<MaintenanceWindow, "id" | "tenantId">): Promise<MaintenanceWindow>;
   resolveMaintenanceWindow(windowId: string, resolvedAt?: string): Promise<MaintenanceWindow | null>;
   createTab(tenantId: string, input: Omit<TabDefinition, "id" | "tenantId">): Promise<TabDefinition>;
+  updateTab(tabId: string, patch: Partial<Omit<TabDefinition, "id" | "tenantId">>): Promise<TabDefinition | null>;
+  deleteTab(tabId: string): Promise<boolean>;
   updateTabs(tabs: TabDefinition[]): Promise<TabDefinition[]>;
   saveSnapshot(snapshot: Snapshot): Promise<Snapshot>;
   computeOverallStatus(tenantId: string): Promise<StatusLevel>;

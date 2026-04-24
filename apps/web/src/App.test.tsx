@@ -25,6 +25,7 @@ const mockApi = vi.hoisted(() => ({
   branding: vi.fn(),
   colors: vi.fn(),
   tabs: vi.fn(),
+  services: vi.fn(),
   connectors: vi.fn(),
   platformSettings: vi.fn(),
   collectionHealth: vi.fn(),
@@ -44,6 +45,11 @@ const mockApi = vi.hoisted(() => ({
   createSubscription: vi.fn(),
   deleteSubscription: vi.fn(),
   createTab: vi.fn(),
+  updateTab: vi.fn(),
+  deleteTab: vi.fn(),
+  createService: vi.fn(),
+  updateService: vi.fn(),
+  deleteService: vi.fn(),
   createConnector: vi.fn(),
   updateConnector: vi.fn(),
   deleteConnector: vi.fn(),
@@ -237,6 +243,8 @@ function buildStatusView(): StatusView {
         severity: "maintenance",
         startsAt: "2026-04-20T09:00:00.000Z",
         endsAt: null,
+        updatedAt: "2026-04-20T09:15:30.000Z",
+        severityTrend: "unchanged",
         active: true
       },
       {
@@ -249,6 +257,8 @@ function buildStatusView(): StatusView {
         severity: "degraded",
         startsAt: "2026-04-20T09:30:00.000Z",
         endsAt: null,
+        updatedAt: "2026-04-20T09:45:30.000Z",
+        severityTrend: "worse",
         active: true
       },
       {
@@ -261,6 +271,8 @@ function buildStatusView(): StatusView {
         severity: "healthy",
         startsAt: null,
         endsAt: null,
+        updatedAt: "2026-04-20T10:00:00.000Z",
+        severityTrend: "improved",
         active: false
       }
     ],
@@ -342,7 +354,43 @@ function buildStatusView(): StatusView {
         },
         firstCollectedAt: "2026-04-20T00:00:00.000Z",
         lastCollectedAt: "2026-04-20T10:00:00.000Z",
-        sampleCount: 3
+        sampleCount: 3,
+        serviceSummaries: [
+          {
+            tenantId: "tenant-primary-site",
+            serviceId: "svc-prom",
+            day: "2026-04-20",
+            overallStatus: "maintenance",
+            secondsByStatus: {
+              healthy: 0,
+              degraded: 0,
+              down: 0,
+              maintenance: 120,
+              unknown: 0
+            },
+            firstCollectedAt: "2026-04-20T00:00:00.000Z",
+            lastCollectedAt: "2026-04-20T10:00:00.000Z",
+            sampleCount: 3,
+            latestSummary: "Prometheus rollout in progress"
+          },
+          {
+            tenantId: "tenant-primary-site",
+            serviceId: "svc-network",
+            day: "2026-04-20",
+            overallStatus: "degraded",
+            secondsByStatus: {
+              healthy: 300,
+              degraded: 600,
+              down: 0,
+              maintenance: 0,
+              unknown: 0
+            },
+            firstCollectedAt: "2026-04-20T00:00:00.000Z",
+            lastCollectedAt: "2026-04-20T10:00:00.000Z",
+            sampleCount: 3,
+            latestSummary: "Latency elevated on the core router"
+          }
+        ]
       }
     ]
   };
@@ -468,6 +516,7 @@ describe("status UI", () => {
     expect(screen.getByText("Deploying Prometheus rules.")).toBeInTheDocument();
     expect(screen.getAllByText("Core Router").length).toBeGreaterThan(0);
     expect(screen.getByText(/Investigating transient route instability/)).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Core Router status history").length).toBeGreaterThan(0);
   });
 
   it("toggles and persists dark mode on the Cachet-style status page", async () => {
@@ -719,7 +768,12 @@ describe("admin UI", () => {
     mockApi.deleteSubscription.mockResolvedValue({ ok: true });
     mockApi.updateBranding.mockResolvedValue(view.meta);
     mockApi.createTab.mockResolvedValue(view.tabs[0]);
+    mockApi.updateTab.mockResolvedValue(view.tabs[1]);
+    mockApi.deleteTab.mockResolvedValue({ ok: true });
     mockApi.updateColors.mockResolvedValue(view.colors);
+    mockApi.createService.mockResolvedValue(view.services[1]);
+    mockApi.updateService.mockResolvedValue(view.services[1]);
+    mockApi.deleteService.mockResolvedValue({ ok: true });
     mockApi.createBanner.mockResolvedValue(view.banners[0]);
     mockApi.updateBanner.mockResolvedValue(view.banners[0]);
     mockApi.deleteBanner.mockResolvedValue({ ok: true });
@@ -762,6 +816,47 @@ describe("admin UI", () => {
       });
     });
     fireEvent.change(screen.getByLabelText("Current tenant"), { target: { value: "primary-site" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Services" }));
+    expect(screen.getByText("Core Router")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create service" }));
+    dialog = screen.getByRole("dialog");
+    const serviceCreateScope = within(dialog);
+    fireEvent.change(serviceCreateScope.getByLabelText("Service name"), { target: { value: "TN Core Network" } });
+    fireEvent.change(serviceCreateScope.getByLabelText("URL slug"), { target: { value: "tn-core-network" } });
+    fireEvent.change(serviceCreateScope.getByLabelText("Category"), { target: { value: "infrastructure" } });
+    fireEvent.change(serviceCreateScope.getByLabelText("Topic"), { target: { value: "network" } });
+    fireEvent.change(serviceCreateScope.getByLabelText(/^Tags/), { target: { value: "network, critical" } });
+    fireEvent.change(serviceCreateScope.getByLabelText("Source ref"), { target: { value: "zabbix:tn-core-network" } });
+    fireEvent.click(serviceCreateScope.getByRole("button", { name: "Create service" }));
+    await waitFor(() => {
+      expect(mockApi.createService).toHaveBeenCalledWith({
+        tenantSlug: "primary-site",
+        name: "TN Core Network",
+        slug: "tn-core-network",
+        category: "infrastructure",
+        topic: "network",
+        tags: ["network", "critical"],
+        sourceType: "zabbix",
+        sourceRef: "zabbix:tn-core-network",
+        enabled: true
+      });
+    });
+
+    const serviceRow = screen.getByText("Core Router").closest(".list-group-item");
+    expect(serviceRow).not.toBeNull();
+    fireEvent.click(within(serviceRow as HTMLElement).getByRole("button", { name: "Edit" }));
+    dialog = screen.getByRole("dialog");
+    const serviceEditScope = within(dialog);
+    fireEvent.change(serviceEditScope.getByLabelText("Category"), { target: { value: "infrastructure" } });
+    fireEvent.click(serviceEditScope.getByRole("button", { name: "Save service" }));
+    await waitFor(() => {
+      expect(mockApi.updateService).toHaveBeenCalledWith("svc-network", expect.objectContaining({ category: "infrastructure" }));
+    });
+    fireEvent.click(within(serviceRow as HTMLElement).getByRole("button", { name: "Delete" }));
+    await waitFor(() => {
+      expect(mockApi.deleteService).toHaveBeenCalledWith("svc-network");
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Connectors" }));
     expect(screen.getByText("Prometheus cluster")).toBeInTheDocument();
@@ -847,18 +942,32 @@ describe("admin UI", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
-    const deliveryPanel = screen.getByText("Delivery settings").closest(".panel");
-    expect(deliveryPanel).not.toBeNull();
-    fireEvent.click(within(deliveryPanel as HTMLElement).getByRole("button", { name: "Edit" }));
+    const smtpPanel = screen.getByText("SMTP server").closest(".panel");
+    expect(smtpPanel).not.toBeNull();
+    fireEvent.click(within(smtpPanel as HTMLElement).getByRole("button", { name: "Edit" }));
     dialog = screen.getByRole("dialog");
     const deliveryScope = within(dialog);
     fireEvent.change(deliveryScope.getByLabelText("Host"), { target: { value: "smtp.example.org" } });
     fireEvent.change(deliveryScope.getByLabelText("From address"), { target: { value: "status@example.org" } });
-    fireEvent.click(deliveryScope.getByRole("button", { name: "Save notification settings" }));
+    fireEvent.click(deliveryScope.getByRole("button", { name: "Save SMTP settings" }));
     await waitFor(() => {
       expect(mockApi.updatePlatformSettings).toHaveBeenCalledWith(
         expect.objectContaining({
           notifications: expect.objectContaining({ smtpHost: "smtp.example.org", smtpFrom: "status@example.org" })
+        })
+      );
+    });
+    const slackPanel = screen.getByText("Global Slack webhook").closest(".panel");
+    expect(slackPanel).not.toBeNull();
+    fireEvent.click(within(slackPanel as HTMLElement).getByRole("button", { name: "Edit" }));
+    dialog = screen.getByRole("dialog");
+    const slackScope = within(dialog);
+    fireEvent.change(slackScope.getByLabelText("Global Slack webhook URL"), { target: { value: "https://hooks.slack.com/services/new" } });
+    fireEvent.click(slackScope.getByRole("button", { name: "Save Slack settings" }));
+    await waitFor(() => {
+      expect(mockApi.updatePlatformSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          notifications: expect.objectContaining({ slackWebhookUrl: "https://hooks.slack.com/services/new" })
         })
       );
     });
@@ -908,6 +1017,26 @@ describe("admin UI", () => {
         filterQuery: "tag:critical",
         isGlobal: false
       });
+    });
+
+    const networkTabRow = screen.getByText("Network").closest(".list-group-item");
+    expect(networkTabRow).not.toBeNull();
+    fireEvent.click(within(networkTabRow as HTMLElement).getByRole("button", { name: "Edit" }));
+    dialog = screen.getByRole("dialog");
+    const tabEditScope = within(dialog);
+    expect(tabEditScope.getByText(/Supported tokens/)).toBeInTheDocument();
+    fireEvent.change(tabEditScope.getByLabelText("Title"), { target: { value: "Network critical" } });
+    fireEvent.change(tabEditScope.getByLabelText("Filter query"), { target: { value: "category:network tag:critical" } });
+    fireEvent.click(tabEditScope.getByRole("button", { name: "Save tab" }));
+    await waitFor(() => {
+      expect(mockApi.updateTab).toHaveBeenCalledWith(
+        "tab-network",
+        expect.objectContaining({ title: "Network critical", filterQuery: "category:network tag:critical", enabled: true })
+      );
+    });
+    fireEvent.click(within(networkTabRow as HTMLElement).getByRole("button", { name: "Delete" }));
+    await waitFor(() => {
+      expect(mockApi.deleteTab).toHaveBeenCalledWith("tab-network");
     });
 
     const colorsRow = screen.getByText("Status colors").closest(".list-group-item");

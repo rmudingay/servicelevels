@@ -10,6 +10,7 @@ import type {
   MaintenanceWindow,
   NotificationSubscription,
   PlatformSettings,
+  ServiceDailySummary,
   Snapshot,
   StatusDailySummary,
   StatusLevel,
@@ -20,7 +21,7 @@ import type {
 import { createHash } from "node:crypto";
 import { nowIso, slugify, worstStatus } from "../utils.js";
 import { clonePlatformSettings, platformSettingsFromConfig } from "../settings.js";
-import { mergeSummaryStatus, splitUtcIntervalByDay, utcDayKey } from "./utils.js";
+import { mergeSummaryStatus, severityTrend, splitUtcIntervalByDay, utcDayKey } from "./utils.js";
 import type { AppConfig } from "../config.js";
 
 type InternalState = {
@@ -84,8 +85,47 @@ function cloneSecondsByStatus(seconds: Record<StatusLevel, number>): Record<Stat
 function cloneSummary(summary: StatusDailySummary): StatusDailySummary {
   return {
     ...summary,
-    secondsByStatus: cloneSecondsByStatus(summary.secondsByStatus)
+    secondsByStatus: cloneSecondsByStatus(summary.secondsByStatus),
+    serviceSummaries: (summary.serviceSummaries ?? []).map((entry) => ({
+      ...entry,
+      secondsByStatus: cloneSecondsByStatus(entry.secondsByStatus)
+    }))
   };
+}
+
+function createServiceDailySummary(
+  tenantId: string,
+  serviceId: string,
+  day: string,
+  observedAt: string,
+  latestSummary = "Status unavailable"
+): ServiceDailySummary {
+  return {
+    tenantId,
+    serviceId,
+    day,
+    overallStatus: "unknown",
+    secondsByStatus: emptySecondsByStatus(),
+    firstCollectedAt: observedAt,
+    lastCollectedAt: observedAt,
+    sampleCount: 0,
+    latestSummary
+  };
+}
+
+function ensureServiceDailySummary(
+  summary: StatusDailySummary,
+  serviceId: string,
+  observedAt: string,
+  latestSummary = "Status unavailable"
+): ServiceDailySummary {
+  const existing = summary.serviceSummaries.find((entry) => entry.serviceId === serviceId);
+  if (existing) {
+    return existing;
+  }
+  const serviceSummary = createServiceDailySummary(summary.tenantId, serviceId, summary.day, observedAt, latestSummary);
+  summary.serviceSummaries = [...summary.serviceSummaries, serviceSummary];
+  return serviceSummary;
 }
 
 function defaultColorsForTenant(tenantId: string): ColorMapping[] {
@@ -110,7 +150,8 @@ function ensureDailySummary(state: InternalState, tenantId: string, day: string)
     secondsByStatus: emptySecondsByStatus(),
     firstCollectedAt: `${day}T00:00:00.000Z`,
     lastCollectedAt: `${day}T00:00:00.000Z`,
-    sampleCount: 0
+    sampleCount: 0,
+    serviceSummaries: []
   };
   state.dailySummaries = [...state.dailySummaries, summary];
   return summary;
@@ -127,6 +168,28 @@ function addObservation(summary: StatusDailySummary, status: StatusLevel, observ
   summary.sampleCount += 1;
   summary.firstCollectedAt = summary.sampleCount === 1 || observedAt < summary.firstCollectedAt ? observedAt : summary.firstCollectedAt;
   summary.lastCollectedAt = observedAt > summary.lastCollectedAt ? observedAt : summary.lastCollectedAt;
+}
+
+function addServiceDuration(
+  summary: StatusDailySummary,
+  service: Snapshot["services"][number],
+  seconds: number,
+  observedAt: string
+): void {
+  const serviceSummary = ensureServiceDailySummary(summary, service.serviceId, observedAt, service.summary);
+  serviceSummary.secondsByStatus[service.status] = (serviceSummary.secondsByStatus[service.status] ?? 0) + seconds;
+  serviceSummary.overallStatus = mergeSummaryStatus(serviceSummary.overallStatus, service.status);
+  serviceSummary.latestSummary = service.summary;
+  serviceSummary.lastCollectedAt = serviceSummary.lastCollectedAt > observedAt ? serviceSummary.lastCollectedAt : observedAt;
+}
+
+function addServiceObservation(summary: StatusDailySummary, service: Snapshot["services"][number], observedAt: string): void {
+  const serviceSummary = ensureServiceDailySummary(summary, service.serviceId, observedAt, service.summary);
+  serviceSummary.overallStatus = mergeSummaryStatus(serviceSummary.overallStatus, service.status);
+  serviceSummary.latestSummary = service.summary;
+  serviceSummary.sampleCount += 1;
+  serviceSummary.firstCollectedAt = serviceSummary.sampleCount === 1 || observedAt < serviceSummary.firstCollectedAt ? observedAt : serviceSummary.firstCollectedAt;
+  serviceSummary.lastCollectedAt = observedAt > serviceSummary.lastCollectedAt ? observedAt : serviceSummary.lastCollectedAt;
 }
 
 function seedState(config: AppConfig): InternalState {
@@ -211,6 +274,8 @@ function seedState(config: AppConfig): InternalState {
       severity: "maintenance",
       startsAt: null,
       endsAt: null,
+      updatedAt: nowIso(),
+      severityTrend: null,
       active: true
     }
   ];
@@ -314,7 +379,18 @@ function seedState(config: AppConfig): InternalState {
         secondsByStatus: emptySecondsByStatus(),
         firstCollectedAt: snapshot.collectedAt,
         lastCollectedAt: snapshot.collectedAt,
-        sampleCount: 1
+        sampleCount: 1,
+        serviceSummaries: snapshot.services.map((service) => ({
+          tenantId: tenant.id,
+          serviceId: service.serviceId,
+          day: utcDayKey(snapshot.collectedAt),
+          overallStatus: service.status,
+          secondsByStatus: emptySecondsByStatus(),
+          firstCollectedAt: snapshot.collectedAt,
+          lastCollectedAt: snapshot.collectedAt,
+          sampleCount: 1,
+          latestSummary: service.summary
+        }))
       }
     ],
     users: [
@@ -596,6 +672,48 @@ export class MemoryStore {
     return true;
   }
 
+  async createService(tenantId: string, input: Omit<ServiceDefinition, "id" | "tenantId">): Promise<ServiceDefinition> {
+    const service: ServiceDefinition = {
+      ...input,
+      id: `service-${slugify(input.slug || input.name)}-${Date.now()}`,
+      tenantId,
+      slug: slugify(input.slug || input.name)
+    };
+    this.state.services = [...this.state.services, service];
+    return service;
+  }
+
+  async updateService(serviceId: string, patch: Partial<Omit<ServiceDefinition, "id" | "tenantId">>): Promise<ServiceDefinition | null> {
+    const index = this.state.services.findIndex((service) => service.id === serviceId);
+    if (index < 0) {
+      return null;
+    }
+    const current = this.state.services[index];
+    const next: ServiceDefinition = {
+      ...current,
+      ...patch,
+      slug: patch.slug !== undefined ? slugify(patch.slug) : current.slug
+    };
+    this.state.services[index] = next;
+    return next;
+  }
+
+  async deleteService(serviceId: string): Promise<boolean> {
+    const before = this.state.services.length;
+    this.state.services = this.state.services.filter((service) => service.id !== serviceId);
+    if (this.state.services.length === before) {
+      return false;
+    }
+    this.state.incidents = this.state.incidents.filter((entry) => entry.serviceId !== serviceId);
+    this.state.maintenance = this.state.maintenance.filter((entry) => entry.serviceId !== serviceId);
+    this.state.subscriptions = this.state.subscriptions.filter((entry) => entry.serviceId !== serviceId);
+    this.state.dailySummaries = this.state.dailySummaries.map((summary) => ({
+      ...summary,
+      serviceSummaries: summary.serviceSummaries.filter((entry) => entry.serviceId !== serviceId)
+    }));
+    return true;
+  }
+
   async createSubscription(tenantId: string, input: Omit<NotificationSubscription, "id" | "tenantId">): Promise<NotificationSubscription> {
     const subscription: NotificationSubscription = {
       ...input,
@@ -645,11 +763,16 @@ export class MemoryStore {
     return this.state.connectors.length !== before;
   }
 
-  async createBanner(tenantId: string, input: Omit<Banner, "id" | "tenantId">): Promise<Banner> {
+  async createBanner(
+    tenantId: string,
+    input: Omit<Banner, "id" | "tenantId" | "updatedAt" | "severityTrend"> & Partial<Pick<Banner, "updatedAt" | "severityTrend">>
+  ): Promise<Banner> {
     const banner: Banner = {
       ...input,
       id: `banner-${slugify(input.title)}-${Date.now()}`,
-      tenantId
+      tenantId,
+      updatedAt: input.updatedAt ?? nowIso(),
+      severityTrend: input.severityTrend ?? null
     };
     this.state.banners = [...this.state.banners, banner];
     return banner;
@@ -701,7 +824,13 @@ export class MemoryStore {
       return null;
     }
     const current = this.state.banners[index];
-    const next = { ...current, ...patch };
+    const nextSeverity = patch.severity ?? current.severity;
+    const next = {
+      ...current,
+      ...patch,
+      updatedAt: nowIso(),
+      severityTrend: patch.severity ? severityTrend(current.severity, nextSeverity) : "unchanged"
+    };
     this.state.banners[index] = next;
     return next;
   }
@@ -712,7 +841,7 @@ export class MemoryStore {
       return null;
     }
     const current = this.state.banners[index];
-    const next = { ...current, active: !current.active };
+    const next = { ...current, active: !current.active, updatedAt: nowIso(), severityTrend: "unchanged" as const };
     this.state.banners[index] = next;
     return next;
   }
@@ -731,6 +860,22 @@ export class MemoryStore {
     };
     this.state.tabs = [...this.state.tabs, tab];
     return tab;
+  }
+
+  async updateTab(tabId: string, patch: Partial<Omit<TabDefinition, "id" | "tenantId">>): Promise<TabDefinition | null> {
+    const index = this.state.tabs.findIndex((tab) => tab.id === tabId);
+    if (index < 0) {
+      return null;
+    }
+    const next = { ...this.state.tabs[index], ...patch };
+    this.state.tabs[index] = next;
+    return next;
+  }
+
+  async deleteTab(tabId: string): Promise<boolean> {
+    const before = this.state.tabs.length;
+    this.state.tabs = this.state.tabs.filter((tab) => tab.id !== tabId);
+    return this.state.tabs.length !== before;
   }
 
   async updateTabs(tabs: TabDefinition[]): Promise<TabDefinition[]> {
@@ -758,9 +903,13 @@ export class MemoryStore {
         secondsByStatus: emptySecondsByStatus(),
         firstCollectedAt: snapshot.collectedAt,
         lastCollectedAt: snapshot.collectedAt,
-        sampleCount: 0
+        sampleCount: 0,
+        serviceSummaries: []
       };
     addObservation(currentSummary, snapshot.overallStatus, snapshot.collectedAt);
+    for (const service of snapshot.services) {
+      addServiceObservation(currentSummary, service, snapshot.collectedAt);
+    }
     summaries.set(currentDay, currentSummary);
 
     if (previous) {
@@ -773,9 +922,13 @@ export class MemoryStore {
             secondsByStatus: emptySecondsByStatus(),
             firstCollectedAt: segment.segmentStart,
             lastCollectedAt: segment.segmentEnd,
-            sampleCount: 0
+            sampleCount: 0,
+            serviceSummaries: []
           };
         addDuration(summary, previous.overallStatus, segment.seconds, segment.segmentEnd);
+        for (const service of previous.services) {
+          addServiceDuration(summary, service, segment.seconds, segment.segmentEnd);
+        }
         summary.firstCollectedAt = summary.firstCollectedAt < segment.segmentStart ? summary.firstCollectedAt : segment.segmentStart;
         summary.lastCollectedAt = summary.lastCollectedAt > segment.segmentEnd ? summary.lastCollectedAt : segment.segmentEnd;
         summaries.set(segment.day, summary);

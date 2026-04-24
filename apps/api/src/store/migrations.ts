@@ -66,6 +66,8 @@ export const migrations: Migration[] = [
         severity text NOT NULL,
         starts_at timestamptz NULL,
         ends_at timestamptz NULL,
+        updated_at timestamptz NULL,
+        severity_trend text NULL,
         active boolean NOT NULL DEFAULT true
       )`,
       `CREATE TABLE IF NOT EXISTS incidents (
@@ -154,6 +156,20 @@ export const migrations: Migration[] = [
     id: "003_connector_error_message",
     statements: [
       `ALTER TABLE connectors ADD COLUMN IF NOT EXISTS last_error_message text`
+    ]
+  },
+  {
+    id: "004_service_daily_summaries",
+    statements: [
+      `ALTER TABLE daily_status_summaries ADD COLUMN IF NOT EXISTS service_summaries jsonb NOT NULL DEFAULT '[]'::jsonb`
+    ]
+  },
+  {
+    id: "005_banner_metadata",
+    statements: [
+      `ALTER TABLE banners ADD COLUMN IF NOT EXISTS updated_at timestamptz NULL`,
+      `ALTER TABLE banners ADD COLUMN IF NOT EXISTS severity_trend text NULL`,
+      `UPDATE banners SET updated_at = COALESCE(updated_at, starts_at, now()) WHERE updated_at IS NULL`
     ]
   }
 ];
