@@ -497,17 +497,20 @@ export function StatusPage() {
     };
   }, [tenantSlug]);
 
+  const selectedStatusLoginMode =
+    authOptions.publicAuthMode !== "public" && authOptions.publicAuthMode !== "ip" ? authOptions.publicAuthMode : loginMode;
+
   async function handleStatusLogin(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (authModeUsesRedirect(loginMode)) {
-      browserRedirect.assign(api.ssoStartUrl(loginMode as "oidc" | "oauth" | "saml", "status", currentReturnPath()));
+    if (authModeUsesRedirect(selectedStatusLoginMode)) {
+      browserRedirect.assign(api.ssoStartUrl(selectedStatusLoginMode as "oidc" | "oauth" | "saml", "status", currentReturnPath()));
       return;
     }
     try {
       await api.login({
-        mode: loginMode,
-        username: authModeUsesPassword(loginMode) ? username : undefined,
-        password: authModeUsesPassword(loginMode) ? password : undefined
+        mode: selectedStatusLoginMode,
+        username: authModeUsesPassword(selectedStatusLoginMode) ? username : undefined,
+        password: authModeUsesPassword(selectedStatusLoginMode) ? password : undefined
       });
       setLoginMessage("Authenticated.");
       setNeedsAuth(false);
@@ -559,11 +562,11 @@ export function StatusPage() {
             <form className="form-grid" onSubmit={handleStatusLogin}>
               <label>
                 Authentication mode
-                <select value={loginMode} onChange={(event) => setLoginMode(event.target.value as AuthMode)}>
+                <select value={selectedStatusLoginMode} onChange={(event) => setLoginMode(event.target.value as AuthMode)}>
                   <option value={authOptions.publicAuthMode}>{authModeLabel(authOptions.publicAuthMode)}</option>
                 </select>
               </label>
-              {authModeUsesPassword(loginMode) ? (
+              {authModeUsesPassword(selectedStatusLoginMode) ? (
                 <>
                   <label>
                     Username
@@ -579,7 +582,7 @@ export function StatusPage() {
                 </>
               ) : (
                 <button className="primary-button" type="submit">
-                  Continue with {authModeLabel(loginMode)}
+                  Continue with {authModeLabel(selectedStatusLoginMode)}
                 </button>
               )}
             </form>
@@ -1099,17 +1102,19 @@ export function AdminPage() {
     }
   }, [tenantSlug, editingBannerId, bannerForm.scopeType]);
 
+  const selectedAdminLoginMode = authOptions.adminAuthModes.includes(loginMode) ? loginMode : authOptions.adminAuthModes[0] ?? loginMode;
+
   async function handleLogin(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (authModeUsesRedirect(loginMode)) {
-      browserRedirect.assign(api.ssoStartUrl(loginMode as "oidc" | "oauth" | "saml", "admin", currentReturnPath()));
+    if (authModeUsesRedirect(selectedAdminLoginMode)) {
+      browserRedirect.assign(api.ssoStartUrl(selectedAdminLoginMode as "oidc" | "oauth" | "saml", "admin", currentReturnPath()));
       return;
     }
     try {
       await api.login({
-        mode: loginMode,
-        username: authModeUsesPassword(loginMode) ? username : undefined,
-        password: authModeUsesPassword(loginMode) ? password : undefined
+        mode: selectedAdminLoginMode,
+        username: authModeUsesPassword(selectedAdminLoginMode) ? username : undefined,
+        password: authModeUsesPassword(selectedAdminLoginMode) ? password : undefined
       });
       const current = await api.me();
       setMe(current);
@@ -1678,7 +1683,7 @@ export function AdminPage() {
               <form className="cachet-form" onSubmit={handleLogin}>
                 <label>
                   Authentication mode
-                  <select value={loginMode} onChange={(event) => setLoginMode(event.target.value as AuthMode)}>
+                  <select value={selectedAdminLoginMode} onChange={(event) => setLoginMode(event.target.value as AuthMode)}>
                     {authOptions.adminAuthModes.map((mode) => (
                       <option key={mode} value={mode}>
                         {authModeLabel(mode)}
@@ -1686,7 +1691,7 @@ export function AdminPage() {
                     ))}
                   </select>
                 </label>
-                {authModeUsesPassword(loginMode) ? (
+                {authModeUsesPassword(selectedAdminLoginMode) ? (
                   <>
                     <label>
                       Username
@@ -1702,7 +1707,7 @@ export function AdminPage() {
                   </>
                 ) : (
                   <button className="btn btn-success" type="submit">
-                    Continue with {authModeLabel(loginMode)}
+                    Continue with {authModeLabel(selectedAdminLoginMode)}
                   </button>
                 )}
               </form>
