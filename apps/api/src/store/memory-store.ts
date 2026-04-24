@@ -9,6 +9,7 @@ import type {
   ServiceDefinition,
   MaintenanceWindow,
   NotificationSubscription,
+  PlatformSettings,
   Snapshot,
   StatusDailySummary,
   StatusLevel,
@@ -18,6 +19,7 @@ import type {
 } from "@service-levels/shared";
 import { createHash } from "node:crypto";
 import { nowIso, slugify, worstStatus } from "../utils.js";
+import { clonePlatformSettings, platformSettingsFromConfig } from "../settings.js";
 import { mergeSummaryStatus, splitUtcIntervalByDay, utcDayKey } from "./utils.js";
 import type { AppConfig } from "../config.js";
 
@@ -37,6 +39,7 @@ type InternalState = {
   dailySummaries: StatusDailySummary[];
   users: AdminUser[];
   passwordHashes: Record<string, string>;
+  platformSettings: PlatformSettings;
 };
 
 function statusSummary(status: StatusLevel): string {
@@ -327,7 +330,8 @@ function seedState(config: AppConfig): InternalState {
     ],
     passwordHashes: {
       [config.adminUsername]: hashPassword(config.adminPassword)
-    }
+    },
+    platformSettings: platformSettingsFromConfig(config)
   };
 }
 
@@ -341,11 +345,19 @@ export class MemoryStore {
   }
 
   async getMeta(): Promise<AppMeta> {
-    return this.state.meta;
+    return {
+      ...this.state.meta,
+      publicAuthMode: this.state.platformSettings.auth.publicAuthMode,
+      adminAuthModes: this.state.platformSettings.auth.adminAuthModes
+    };
   }
 
   async getBranding(): Promise<Branding> {
     return this.state.branding;
+  }
+
+  async getPlatformSettings(): Promise<PlatformSettings> {
+    return clonePlatformSettings(this.state.platformSettings);
   }
 
   async getTenants(): Promise<Tenant[]> {
@@ -402,7 +414,7 @@ export class MemoryStore {
       : this.state.tenants[0];
 
     return {
-      meta: this.state.meta,
+      meta: await this.getMeta(),
       tenants: await this.getTenants(),
       tabs: await this.getTabs(tenant?.id),
       services: await this.getServices(tenant?.id),
@@ -493,6 +505,16 @@ export class MemoryStore {
       isAdmin: input.isAdmin ?? false,
       password: null
     });
+  }
+
+  async updatePlatformSettings(input: PlatformSettings): Promise<PlatformSettings> {
+    this.state.platformSettings = clonePlatformSettings(input);
+    this.state.meta = {
+      ...this.state.meta,
+      publicAuthMode: input.auth.publicAuthMode,
+      adminAuthModes: [...input.auth.adminAuthModes]
+    };
+    return this.getPlatformSettings();
   }
 
   async updateBranding(input: Partial<Branding>): Promise<Branding> {

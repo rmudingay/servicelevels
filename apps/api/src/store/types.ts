@@ -8,6 +8,7 @@ import type {
   ServiceDefinition,
   MaintenanceWindow,
   NotificationSubscription,
+  PlatformSettings,
   Snapshot,
   StatusDailySummary,
   StatusLevel,
@@ -20,6 +21,7 @@ import type {
 export interface StatusRepository {
   getMeta(): Promise<AppMeta>;
   getBranding(): Promise<Branding>;
+  getPlatformSettings(): Promise<PlatformSettings>;
   getTenants(): Promise<Tenant[]>;
   getTabs(tenantId?: string): Promise<TabDefinition[]>;
   getServices(tenantId?: string): Promise<ServiceDefinition[]>;
@@ -42,6 +44,7 @@ export interface StatusRepository {
   upsertExternalUser(
     input: Pick<AdminUser, "username" | "displayName" | "email" | "authType"> & { enabled?: boolean; isAdmin?: boolean }
   ): Promise<AdminUser>;
+  updatePlatformSettings(input: PlatformSettings): Promise<PlatformSettings>;
   updateBranding(input: Partial<Branding>): Promise<Branding>;
   updateColors(tenantId: string, updates: Array<{ statusKey: StatusLevel; colorHex: string; label: string }>): Promise<ColorMapping[]>;
   createTenant(input: Omit<Tenant, "id">): Promise<Tenant>;

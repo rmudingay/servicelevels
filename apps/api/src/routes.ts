@@ -13,6 +13,7 @@ import {
 } from "./auth/sso.js";
 import { buildStatusFeed } from "./notifications.js";
 import type { AppConfig } from "./config.js";
+import { normalizePlatformSettings, resolveEffectiveConfig } from "./settings.js";
 import type { StatusRepository } from "./store/types.js";
 import { nowIso, slugify } from "./utils.js";
 import type { Banner, StatusLevel, Tenant } from "@service-levels/shared";
@@ -114,16 +115,21 @@ function isMainAdmin(request: { user?: { username: string } }, config: AppConfig
 }
 
 export async function registerRoutes(app: FastifyInstance, store: StatusRepository, config: AppConfig): Promise<void> {
+  const effectiveConfig = () => resolveEffectiveConfig(config, store);
+
   app.get("/healthz", async () => ({ ok: true }));
 
   app.get("/api/v1/meta", async () => store.getMeta());
 
-  app.get("/api/v1/auth/options", async () => ({
-    publicAuthMode: config.publicAuthMode,
-    adminAuthModes: availableAuthModes(config),
-    redirectAuthModes: browserRedirectModes(),
-    labels: authModeLabels()
-  }));
+  app.get("/api/v1/auth/options", async () => {
+    const runtimeConfig = await effectiveConfig();
+    return {
+      publicAuthMode: runtimeConfig.publicAuthMode,
+      adminAuthModes: availableAuthModes(runtimeConfig),
+      redirectAuthModes: browserRedirectModes(),
+      labels: authModeLabels()
+    };
+  });
 
   app.get(
     "/api/v1/status",
@@ -171,7 +177,7 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
     }
 
     try {
-      const result = await ingestWebhookEvent(config, store, tenant, source, request.body, normalizeHeaders(request.headers), query.token);
+      const result = await ingestWebhookEvent(await effectiveConfig(), store, tenant, source, request.body, normalizeHeaders(request.headers), query.token);
       reply.code(202).send({
         ok: true,
         tenant: result.tenant,
@@ -196,13 +202,14 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
       reply.code(400).send({ error: "Use the browser redirect SSO start route for this authentication mode" });
       return;
     }
-    const user = await authenticateLogin(store, config, body);
+    const runtimeConfig = await effectiveConfig();
+    const user = await authenticateLogin(store, runtimeConfig, body);
     if (!user) {
       reply.code(401).send({ error: "Invalid credentials" });
       return;
     }
 
-    const token = signAuthToken(config, {
+    const token = signAuthToken(runtimeConfig, {
       userId: user.id,
       username: user.username,
       isAdmin: user.isAdmin
@@ -224,7 +231,7 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
     }
     const target = query.target === "admin" ? "admin" : "status";
     try {
-      const redirectUrl = await createBrowserRedirectUrl(config, params.mode, target, query.returnTo);
+      const redirectUrl = await createBrowserRedirectUrl(await effectiveConfig(), params.mode, target, query.returnTo);
       reply.redirect(redirectUrl);
     } catch (error) {
       reply.code(400).send({ error: error instanceof Error ? error.message : "Unable to start single sign-on" });
@@ -233,14 +240,15 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
 
   app.get("/api/v1/auth/sso/oidc/callback", async (request, reply) => {
     try {
-      const currentUrl = new URL(request.raw.url ?? "/api/v1/auth/sso/oidc/callback", config.appBaseUrl);
+      const runtimeConfig = await effectiveConfig();
+      const currentUrl = new URL(request.raw.url ?? "/api/v1/auth/sso/oidc/callback", runtimeConfig.appBaseUrl);
       const stateToken = currentUrl.searchParams.get("state") ?? undefined;
-      const state = parseSsoState(config, stateToken);
+      const state = parseSsoState(runtimeConfig, stateToken);
       if (!state) {
         throw new Error("Invalid authentication transaction");
       }
-      const result = await completeBrowserSsoLogin(store, config, state.provider, stateToken, currentUrl);
-      const token = signAuthToken(config, {
+      const result = await completeBrowserSsoLogin(store, runtimeConfig, state.provider, stateToken, currentUrl);
+      const token = signAuthToken(runtimeConfig, {
         userId: result.user.id,
         username: result.user.username,
         isAdmin: result.user.isAdmin
@@ -258,10 +266,11 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
 
   app.post("/api/v1/auth/sso/saml/callback", async (request, reply) => {
     try {
+      const runtimeConfig = await effectiveConfig();
       const body = request.body as Record<string, string>;
       const stateToken = body.RelayState ?? body.relayState;
-      const result = await completeBrowserSsoLogin(store, config, "saml", stateToken, undefined, body);
-      const token = signAuthToken(config, {
+      const result = await completeBrowserSsoLogin(store, runtimeConfig, "saml", stateToken, undefined, body);
+      const token = signAuthToken(runtimeConfig, {
         userId: result.user.id,
         username: result.user.username,
         isAdmin: result.user.isAdmin
@@ -279,7 +288,7 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
 
   app.get("/api/v1/auth/sso/saml/metadata", async (_request, reply) => {
     try {
-      const metadata = await getSamlMetadata(config);
+      const metadata = await getSamlMetadata(await effectiveConfig());
       reply.type("application/xml; charset=utf-8").send(metadata);
     } catch (error) {
       reply.code(400).send({ error: error instanceof Error ? error.message : "SAML is not configured" });
@@ -297,6 +306,28 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
   });
 
   app.get("/api/v1/admin/users", { preHandler: requireAdmin(store, config) }, async () => store.listUsers());
+
+  app.get("/api/v1/admin/platform-settings", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
+    if (!isMainAdmin(request, config)) {
+      reply.code(403).send({ error: "Main administrator access required" });
+      return;
+    }
+    return store.getPlatformSettings();
+  });
+
+  app.put("/api/v1/admin/platform-settings", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
+    if (!isMainAdmin(request, config)) {
+      reply.code(403).send({ error: "Main administrator access required" });
+      return;
+    }
+    const current = await store.getPlatformSettings();
+    const settings = normalizePlatformSettings(request.body, current);
+    if (settings.auth.adminAuthModes.length === 0) {
+      reply.code(400).send({ error: "At least one admin authentication mode is required" });
+      return;
+    }
+    return store.updatePlatformSettings(settings);
+  });
 
   app.post("/api/v1/admin/users", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
     if (!isMainAdmin(request, config)) {
@@ -773,13 +804,16 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
     reply.send(updated);
   });
 
-  app.get("/api/v1/dev/info", async () => ({
-    name: config.appName,
-    cookieName: getCookieName(),
-    statusAuthMode: config.publicAuthMode,
-    tenantCount: (await store.getTenants()).length,
-    serviceCount: (await store.getServices()).length,
-    connectorCount: (await store.getConnectors()).length,
-    bannerCount: (await store.getBanners()).length
-  }));
+  app.get("/api/v1/dev/info", async () => {
+    const runtimeConfig = await effectiveConfig();
+    return {
+      name: config.appName,
+      cookieName: getCookieName(),
+      statusAuthMode: runtimeConfig.publicAuthMode,
+      tenantCount: (await store.getTenants()).length,
+      serviceCount: (await store.getServices()).length,
+      connectorCount: (await store.getConnectors()).length,
+      bannerCount: (await store.getBanners()).length
+    };
+  });
 }

@@ -7,6 +7,7 @@ import { bannerMatchesService } from "../connectors/shared.js";
 import { collectConnector } from "../connectors/index.js";
 import type { AppConfig } from "../config.js";
 import { processStatusEvents } from "../notifications.js";
+import { resolveEffectiveConfig } from "../settings.js";
 import { authorizeWebhookConnector, collectWebhookConnector, parseWebhookPayload, resolveWebhookConnector } from "../connectors/webhook.js";
 import type { JsonObject } from "../connectors/shared.js";
 
@@ -132,7 +133,7 @@ export async function collectTenantCycle(repo: StatusRepository, tenant: Tenant)
 export async function persistTenantCycle(config: AppConfig, repo: StatusRepository, cycle: TenantCycle): Promise<void> {
   if (cycle.snapshot) {
     await repo.saveSnapshot(cycle.snapshot);
-    await processStatusEvents(config, repo, cycle.tenant, cycle.previousSnapshot, cycle.snapshot);
+    await processStatusEvents(await resolveEffectiveConfig(config, repo), repo, cycle.tenant, cycle.previousSnapshot, cycle.snapshot);
   }
 
   const erroredConnectorIds = new Set(
@@ -260,7 +261,7 @@ export async function ingestWebhookEvent(
   };
 
   await repo.saveSnapshot(snapshot);
-  await processStatusEvents(config, repo, tenant, previousSnapshot, snapshot);
+  await processStatusEvents(await resolveEffectiveConfig(config, repo), repo, tenant, previousSnapshot, snapshot);
   await repo.updateConnector(connector.id, { lastSuccessAt: collectedAt });
 
   return {

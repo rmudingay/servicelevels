@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import type { AppConfig } from "./config.js";
 import type { StatusRepository } from "./store/types.js";
 import ipaddr from "ipaddr.js";
+import { resolveEffectiveConfig } from "./settings.js";
 
 export type AuthContext = {
   userId: string;
@@ -68,13 +69,14 @@ export function requireAdmin(store: StatusRepository, config: AppConfig) {
 
 export function statusAccessGuard(store: StatusRepository, config: AppConfig) {
   return async function statusGuard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-    if (config.publicAuthMode === "public") {
+    const effectiveConfig = await resolveEffectiveConfig(config, store);
+    if (effectiveConfig.publicAuthMode === "public") {
       return;
     }
 
-    if (config.publicAuthMode === "ip") {
+    if (effectiveConfig.publicAuthMode === "ip") {
       const ip = request.ip;
-      const allowed = config.allowedIpRanges.some((range) => {
+      const allowed = effectiveConfig.allowedIpRanges.some((range) => {
         try {
           const parsedRange = ipaddr.parseCIDR(range);
           return ipaddr.parse(ip).match(parsedRange);
@@ -88,7 +90,7 @@ export function statusAccessGuard(store: StatusRepository, config: AppConfig) {
       }
     }
 
-    const context = readAuthToken(config, getRequestToken(request));
+    const context = readAuthToken(effectiveConfig, getRequestToken(request));
     if (context) {
       const user = await store.findUserById(context.userId);
       if (user && user.enabled) {

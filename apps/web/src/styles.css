@@ -249,8 +249,8 @@ textarea:focus {
 .cachet-page {
   min-height: 100vh;
   padding-top: 20px;
-  color: #333333;
-  background: #f0f3f4;
+  color: var(--text);
+  background: var(--bg);
   font-family: "Open Sans", sans-serif;
   font-size: 14px;
   line-height: 1.42857143;
@@ -268,7 +268,7 @@ textarea:focus {
 .cachet-page h4 {
   margin-top: 20px;
   margin-bottom: 10px;
-  color: #333333;
+  color: var(--text);
   font-weight: 300;
   line-height: 1.1;
 }
@@ -287,7 +287,7 @@ textarea:focus {
 
 .cachet-page p,
 .cachet-page strong {
-  color: #333333;
+  color: var(--text);
 }
 
 .cachet-page p {
@@ -296,13 +296,13 @@ textarea:focus {
 
 .cachet-page a,
 .cachet-page .links {
-  color: #04c147;
+  color: var(--accent);
   text-decoration: none;
 }
 
 .cachet-page a:hover,
 .cachet-page .links:hover {
-  color: #039a39;
+  color: var(--accent-strong);
   text-decoration: underline;
 }
 
@@ -321,23 +321,23 @@ textarea:focus {
 
 .cachet-page .alert-warning,
 .cachet-page .alert {
-  background-color: #f7ca18;
-  border-color: #deb515;
+  background-color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 82%, black);
 }
 
 .cachet-page .alert-success {
-  background-color: #04c147;
-  border-color: #03ad3f;
+  background-color: var(--accent);
+  border-color: var(--accent-strong);
 }
 
 .cachet-page .alert-info {
-  background-color: #3498db;
-  border-color: #2e88c5;
+  background-color: var(--blue);
+  border-color: color-mix(in srgb, var(--blue) 82%, black);
 }
 
 .cachet-page .alert-danger {
-  background-color: #ff6f6f;
-  border-color: #e56363;
+  background-color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 82%, black);
 }
 
 .cachet-page .about-app {
@@ -356,7 +356,7 @@ textarea:focus {
 .cachet-page .cachet-controls label {
   display: block;
   margin-bottom: 5px;
-  color: #555555;
+  color: var(--muted-strong);
   font-size: 13px;
   font-weight: 700;
 }
@@ -364,11 +364,11 @@ textarea:focus {
 .cachet-page .cachet-controls select {
   min-height: 34px;
   padding: 6px 12px;
-  color: #555555;
-  background: #ffffff;
-  border: 1px solid #cccccc;
+  color: var(--text);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075);
+  box-shadow: inset 0 1px 1px color-mix(in srgb, var(--text) 9%, transparent);
 }
 
 .cachet-page .section-components,
@@ -390,9 +390,9 @@ textarea:focus {
   min-height: 42px;
   padding: 10px 15px;
   margin-bottom: -1px;
-  color: #333333;
-  background-color: #ffffff;
-  border: 1px solid #e5e5e5;
+  color: var(--text);
+  background-color: var(--surface);
+  border: 1px solid var(--border);
 }
 
 .cachet-page .list-group-item:first-child {
@@ -431,16 +431,16 @@ textarea:focus {
 
 .cachet-page .panel {
   margin-bottom: 20px;
-  background-color: #ffffff;
-  border: 1px solid #e5e5e5;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 4px;
   box-shadow: none;
 }
 
 .cachet-page .panel-heading {
   padding: 10px 15px;
-  background-color: #f5f5f5;
-  border-bottom: 1px solid #e5e5e5;
+  background-color: var(--surface-muted);
+  border-bottom: 1px solid var(--border);
   border-top-left-radius: 3px;
   border-top-right-radius: 3px;
 }
@@ -468,7 +468,7 @@ textarea:focus {
 }
 
 .cachet-page .date {
-  color: #777777;
+  color: var(--muted);
 }
 
 .cachet-page .markdown-body {
@@ -484,13 +484,13 @@ textarea:focus {
 }
 
 .cachet-page .panel-message .panel-heading {
-  background-color: #ffffff;
+  background-color: var(--surface);
 }
 
 .cachet-page .footer {
   margin-top: 30px;
   padding: 20px 0;
-  color: #333333;
+  color: var(--text);
 }
 
 .cachet-page .footer-inner {
@@ -519,7 +519,7 @@ textarea:focus {
   min-height: 0;
   padding: 6px 12px;
   margin-bottom: 0;
-  color: #04c147;
+  color: var(--accent);
   background: transparent;
   border: 0;
   border-radius: 4px;
@@ -532,20 +532,20 @@ textarea:focus {
 }
 
 .cachet-page .btn:hover {
-  color: #039a39;
+  color: var(--accent-strong);
   text-decoration: underline;
 }
 
 .cachet-page .btn.btn-success {
   color: #ffffff;
-  background-color: #04c147;
-  border: 1px solid #03ad3f;
+  background-color: var(--accent);
+  border: 1px solid var(--accent-strong);
   text-decoration: none;
 }
 
 .cachet-page .btn.btn-success:hover {
   color: #ffffff;
-  background-color: #03ad3f;
+  background-color: var(--accent-strong);
   text-decoration: none;
 }
 
@@ -578,7 +578,7 @@ textarea:focus {
   width: 100%;
   min-height: 0;
   padding: 0;
-  color: #04c147;
+  color: var(--accent);
   background: transparent;
   border: 0;
   cursor: pointer;
@@ -587,16 +587,16 @@ textarea:focus {
 }
 
 .cachet-admin-section-button:hover {
-  color: #039a39;
+  color: var(--accent-strong);
   text-decoration: underline;
 }
 
 .cachet-admin-page .list-group-item.active {
-  background-color: #f5f5f5;
+  background-color: var(--surface-muted);
 }
 
 .cachet-row-meta {
-  color: #777777;
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -613,7 +613,7 @@ textarea:focus {
 
 .cachet-form label {
   display: block;
-  color: #555555;
+  color: var(--muted-strong);
   font-size: 13px;
   font-weight: 700;
 }
@@ -626,11 +626,11 @@ textarea:focus {
   min-height: 34px;
   margin-top: 5px;
   padding: 6px 12px;
-  color: #555555;
-  background-color: #ffffff;
-  border: 1px solid #cccccc;
+  color: var(--text);
+  background-color: var(--surface-strong);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075);
+  box-shadow: inset 0 1px 1px color-mix(in srgb, var(--text) 9%, transparent);
   font-family: "Open Sans", sans-serif;
   font-size: 14px;
   line-height: 1.42857143;
@@ -639,6 +639,35 @@ textarea:focus {
 .cachet-form textarea {
   min-height: 92px;
   resize: vertical;
+}
+
+.cachet-form-section {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-muted);
+}
+
+.cachet-form-section h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.cachet-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.cachet-checkbox-group {
+  display: grid;
+  gap: 8px;
+  color: var(--muted-strong);
+  font-size: 13px;
 }
 
 .cachet-form .checkbox-row {
@@ -655,13 +684,13 @@ textarea:focus {
 
 .cachet-help-text {
   margin-top: 12px;
-  color: #777777;
+  color: var(--muted);
 }
 
 .cachet-page .field-help {
   display: block;
   margin-top: 4px;
-  color: #777777;
+  color: var(--muted);
   font-size: 12px;
   font-weight: 400;
 }
@@ -683,8 +712,8 @@ textarea:focus {
 
 .admin-modal {
   width: min(680px, 100%);
-  background: #ffffff;
-  border: 1px solid #d5d5d5;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.22);
 }
@@ -695,20 +724,20 @@ textarea:focus {
   justify-content: space-between;
   gap: 1rem;
   padding: 15px;
-  background: #f5f5f5;
-  border-bottom: 1px solid #e5e5e5;
+  background: var(--surface-muted);
+  border-bottom: 1px solid var(--border);
 }
 
 .admin-modal-heading h2 {
   margin: 0;
-  color: #333333;
+  color: var(--text);
   font-size: 24px;
   font-weight: 300;
 }
 
 .admin-modal-heading p {
   margin: 6px 0 0;
-  color: #777777;
+  color: var(--muted);
 }
 
 .admin-modal > .cachet-form,
@@ -1500,6 +1529,10 @@ input:disabled {
 
   .admin-grid .panel {
     grid-row: auto;
+  }
+
+  .cachet-form-grid {
+    grid-template-columns: 1fr;
   }
 }
 

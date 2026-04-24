@@ -141,6 +141,13 @@ export const migrations: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_snapshots_tenant_collected ON snapshots (tenant_id, collected_at DESC)`,
       `CREATE INDEX IF NOT EXISTS idx_daily_summaries_tenant_day ON daily_status_summaries (tenant_id, day DESC)`
     ]
+  },
+  {
+    id: "002_platform_settings",
+    statements: [
+      `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS auth_settings_json jsonb`,
+      `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS notification_settings_json jsonb`
+    ]
   }
 ];
 

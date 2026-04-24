@@ -102,6 +102,66 @@ export interface NotificationSubscription {
   enabled: boolean;
 }
 
+export interface AuthSettings {
+  publicAuthMode: AuthMode;
+  adminAuthModes: AuthMode[];
+  allowedIpRanges: string[];
+  ldap: {
+    url: string;
+    baseDn: string;
+    bindDn: string;
+    bindPassword: string;
+    userFilter: string;
+    usernameAttribute: string;
+    displayNameAttribute: string;
+    emailAttribute: string;
+  };
+  remoteAuth: {
+    userinfoUrl: string;
+    introspectionUrl: string;
+    clientId: string;
+    clientSecret: string;
+    usernameClaim: string;
+    displayNameClaim: string;
+    emailClaim: string;
+  };
+  oidc: {
+    issuerUrl: string;
+    clientId: string;
+    clientSecret: string;
+    scopes: string[];
+    usernameClaim: string;
+    displayNameClaim: string;
+    emailClaim: string;
+    prompt: string;
+    useUserInfo: boolean;
+  };
+  saml: {
+    entryPoint: string;
+    issuer: string;
+    idpCert: string;
+    privateKey: string;
+    publicCert: string;
+    nameIdAttribute: string;
+    displayNameAttribute: string;
+    emailAttribute: string;
+  };
+}
+
+export interface NotificationSettings {
+  slackWebhookUrl: string;
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPassword: string;
+  smtpFrom: string;
+}
+
+export interface PlatformSettings {
+  auth: AuthSettings;
+  notifications: NotificationSettings;
+}
+
 export interface ColorMapping {
   tenantId: string;
   statusKey: StatusLevel;

@@ -11,6 +11,7 @@ import type {
   ServiceDefinition,
   MaintenanceWindow,
   NotificationSubscription,
+  PlatformSettings,
   Snapshot,
   StatusDailySummary,
   StatusLevel,
@@ -19,6 +20,7 @@ import type {
   Tenant
 } from "@service-levels/shared";
 import type { AppConfig } from "../config.js";
+import { clonePlatformSettings, normalizePlatformSettings, platformSettingsFromConfig } from "../settings.js";
 import { nowIso, slugify } from "../utils.js";
 import { buildSeedState, type SeedState } from "./seed.js";
 import { runMigrations } from "./migrations.js";
@@ -295,12 +297,21 @@ export class PostgresStore implements StatusRepository {
 
   async getMeta(): Promise<AppMeta> {
     this.ensureState();
-    return this.state!.meta;
+    return {
+      ...this.state!.meta,
+      publicAuthMode: this.state!.platformSettings.auth.publicAuthMode,
+      adminAuthModes: this.state!.platformSettings.auth.adminAuthModes
+    };
   }
 
   async getBranding(): Promise<Branding> {
     this.ensureState();
     return this.state!.branding;
+  }
+
+  async getPlatformSettings(): Promise<PlatformSettings> {
+    this.ensureState();
+    return clonePlatformSettings(this.state!.platformSettings);
   }
 
   async getTenants(): Promise<Tenant[]> {
@@ -369,7 +380,7 @@ export class PostgresStore implements StatusRepository {
       : this.state!.tenants[0];
 
     return {
-      meta: this.state!.meta,
+      meta: await this.getMeta(),
       tenants: [...this.state!.tenants],
       tabs: await this.getTabs(tenant?.id),
       services: await this.getServices(tenant?.id),
@@ -480,6 +491,22 @@ export class PostgresStore implements StatusRepository {
       enabled: input.enabled ?? true,
       password: null
     });
+  }
+
+  async updatePlatformSettings(input: PlatformSettings): Promise<PlatformSettings> {
+    this.ensureState();
+    const normalized = normalizePlatformSettings(input, platformSettingsFromConfig(this.config));
+    await this.pool.query(
+      "UPDATE app_settings SET auth_settings_json = $1::jsonb, notification_settings_json = $2::jsonb WHERE id = 1",
+      [JSON.stringify(normalized.auth), JSON.stringify(normalized.notifications)]
+    );
+    this.state!.platformSettings = clonePlatformSettings(normalized);
+    this.state!.meta = {
+      ...this.state!.meta,
+      publicAuthMode: normalized.auth.publicAuthMode,
+      adminAuthModes: [...normalized.auth.adminAuthModes]
+    };
+    return this.getPlatformSettings();
   }
 
   async updateBranding(input: Partial<Branding>): Promise<Branding> {
@@ -944,8 +971,15 @@ export class PostgresStore implements StatusRepository {
     try {
       await client.query("BEGIN");
       await client.query(
-        "INSERT INTO app_settings (id, app_name, logo_url, favicon_url, theme_default) VALUES (1, $1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET app_name = EXCLUDED.app_name, logo_url = EXCLUDED.logo_url, favicon_url = EXCLUDED.favicon_url, theme_default = EXCLUDED.theme_default",
-        [seed.branding.appName, seed.branding.logoUrl, seed.branding.faviconUrl, seed.branding.themeDefault]
+        "INSERT INTO app_settings (id, app_name, logo_url, favicon_url, theme_default, auth_settings_json, notification_settings_json) VALUES (1, $1, $2, $3, $4, $5::jsonb, $6::jsonb) ON CONFLICT (id) DO UPDATE SET app_name = EXCLUDED.app_name, logo_url = EXCLUDED.logo_url, favicon_url = EXCLUDED.favicon_url, theme_default = EXCLUDED.theme_default, auth_settings_json = EXCLUDED.auth_settings_json, notification_settings_json = EXCLUDED.notification_settings_json",
+        [
+          seed.branding.appName,
+          seed.branding.logoUrl,
+          seed.branding.faviconUrl,
+          seed.branding.themeDefault,
+          JSON.stringify(seed.platformSettings.auth),
+          JSON.stringify(seed.platformSettings.notifications)
+        ]
       );
 
       for (const tenant of seed.tenants) {
@@ -1098,8 +1132,17 @@ export class PostgresStore implements StatusRepository {
       app_name: this.config.appName,
       logo_url: this.config.logoUrl,
       favicon_url: this.config.faviconUrl,
-      theme_default: this.config.themeDefault
+      theme_default: this.config.themeDefault,
+      auth_settings_json: null,
+      notification_settings_json: null
     };
+    const platformSettings = normalizePlatformSettings(
+      {
+        auth: parseJson(setting.auth_settings_json, platformSettingsFromConfig(this.config).auth),
+        notifications: parseJson(setting.notification_settings_json, platformSettingsFromConfig(this.config).notifications)
+      },
+      platformSettingsFromConfig(this.config)
+    );
 
     this.state = {
       meta: {
@@ -1107,8 +1150,8 @@ export class PostgresStore implements StatusRepository {
         logoUrl: String(setting.logo_url ?? ""),
         faviconUrl: String(setting.favicon_url ?? ""),
         themeDefault: String(setting.theme_default) as AppMeta["themeDefault"],
-        publicAuthMode: this.config.publicAuthMode,
-        adminAuthModes: this.config.adminAuthModes
+        publicAuthMode: platformSettings.auth.publicAuthMode,
+        adminAuthModes: platformSettings.auth.adminAuthModes
       },
       branding: {
         appName: String(setting.app_name),
@@ -1127,7 +1170,8 @@ export class PostgresStore implements StatusRepository {
       colors: colors.rows.map(mapColor),
       snapshots: snapshots.rows.map(mapSnapshot),
       dailySummaries: dailySummaries.rows.map(mapDailySummary),
-      users: users.rows.map(mapUser)
+      users: users.rows.map(mapUser),
+      platformSettings
     };
   }
 }

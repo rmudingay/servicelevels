@@ -352,6 +352,89 @@ test("non-bootstrap admins are blocked from bootstrap-only user management", asy
   }
 });
 
+test("main admin can configure authentication providers and SMTP settings", async () => {
+  const { app } = await buildRouteApp();
+  try {
+    const cookieHeader = await loginAsAdmin(app);
+
+    const initialSettings = await app.inject({
+      method: "GET",
+      url: "/api/v1/admin/platform-settings",
+      headers: {
+        cookie: cookieHeader
+      }
+    });
+    assert.equal(initialSettings.statusCode, 200);
+
+    const current = initialSettings.json() as {
+      auth: {
+        ldap: Record<string, unknown>;
+        remoteAuth: Record<string, unknown>;
+        oidc: Record<string, unknown>;
+        saml: Record<string, unknown>;
+      };
+      notifications: Record<string, unknown>;
+    };
+
+    const updatedSettings = await app.inject({
+      method: "PUT",
+      url: "/api/v1/admin/platform-settings",
+      headers: {
+        cookie: cookieHeader
+      },
+      payload: {
+        auth: {
+          publicAuthMode: "local",
+          adminAuthModes: ["local", "oidc"],
+          allowedIpRanges: ["127.0.0.1/32"],
+          ldap: current.auth.ldap,
+          remoteAuth: current.auth.remoteAuth,
+          oidc: {
+            ...current.auth.oidc,
+            issuerUrl: "https://idp.example.org",
+            clientId: "service-levels"
+          },
+          saml: current.auth.saml
+        },
+        notifications: {
+          ...current.notifications,
+          smtpHost: "smtp.example.org",
+          smtpPort: 2525,
+          smtpFrom: "status@example.org"
+        }
+      }
+    });
+    assert.equal(updatedSettings.statusCode, 200);
+    assert.equal((updatedSettings.json() as { auth: { publicAuthMode: string }; notifications: { smtpHost: string } }).auth.publicAuthMode, "local");
+    assert.equal((updatedSettings.json() as { notifications: { smtpHost: string } }).notifications.smtpHost, "smtp.example.org");
+
+    const options = await app.inject({
+      method: "GET",
+      url: "/api/v1/auth/options"
+    });
+    assert.equal(options.statusCode, 200);
+    assert.equal((options.json() as { publicAuthMode: string; adminAuthModes: string[] }).publicAuthMode, "local");
+    assert.equal((options.json() as { adminAuthModes: string[] }).adminAuthModes.includes("oidc"), true);
+
+    const deniedStatus = await app.inject({
+      method: "GET",
+      url: "/api/v1/status"
+    });
+    assert.equal(deniedStatus.statusCode, 401);
+
+    const allowedStatus = await app.inject({
+      method: "GET",
+      url: "/api/v1/status",
+      headers: {
+        cookie: cookieHeader
+      }
+    });
+    assert.equal(allowedStatus.statusCode, 200);
+  } finally {
+    await app.close();
+  }
+});
+
 test("admin CRUD routes manage connectors, tabs, banners, subscriptions, branding, colors, and summaries", async () => {
   const { app } = await buildRouteApp();
   try {

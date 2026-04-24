@@ -8,6 +8,7 @@ import type {
   IntegrationConnector,
   MaintenanceWindow,
   NotificationSubscription,
+  PlatformSettings,
   StatusView,
   TabDefinition,
   Tenant,
@@ -70,6 +71,7 @@ export const api = {
   subscriptions: (tenant?: string) => fetchJson<NotificationSubscription[]>(`/api/v1/admin/subscriptions${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`),
   colors: (tenant?: string) => fetchJson<ColorMapping[]>(`/api/v1/admin/colors${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`),
   connectors: (tenant?: string) => fetchJson<IntegrationConnector[]>(`/api/v1/admin/connectors${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`),
+  platformSettings: () => fetchJson<PlatformSettings>("/api/v1/admin/platform-settings"),
   collectionHealth: () =>
     fetchJson<{
       generatedAt: string;
@@ -181,6 +183,11 @@ export const api = {
   demoteUser: (id: string) =>
     fetchJson<AdminUser>(`/api/v1/admin/users/${id}/demote`, {
       method: "POST"
+    }),
+  updatePlatformSettings: (body: PlatformSettings) =>
+    fetchJson<PlatformSettings>("/api/v1/admin/platform-settings", {
+      method: "PUT",
+      body: JSON.stringify(body)
     }),
   updateBranding: (body: Partial<Branding>) =>
     fetchJson<Branding>("/api/v1/admin/branding", {

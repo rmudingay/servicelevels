@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppMeta, AuthMode, StatusView } from "@service-levels/shared";
+import type { AppMeta, AuthMode, PlatformSettings, StatusView } from "@service-levels/shared";
 import {
   AdminPage,
   StatusPage,
@@ -26,6 +26,7 @@ const mockApi = vi.hoisted(() => ({
   colors: vi.fn(),
   tabs: vi.fn(),
   connectors: vi.fn(),
+  platformSettings: vi.fn(),
   collectionHealth: vi.fn(),
   users: vi.fn(),
   incidents: vi.fn(),
@@ -50,6 +51,7 @@ const mockApi = vi.hoisted(() => ({
   updateUser: vi.fn(),
   promoteUser: vi.fn(),
   demoteUser: vi.fn(),
+  updatePlatformSettings: vi.fn(),
   updateBranding: vi.fn(),
   updateColors: vi.fn(),
   ssoStartUrl: vi.fn(() => "/sso")
@@ -81,6 +83,64 @@ function buildMeta(): AppMeta & { adminAuthModes: AuthMode[] } {
     themeDefault: "light",
     publicAuthMode: "public",
     adminAuthModes: ["local"]
+  };
+}
+
+function buildPlatformSettings(): PlatformSettings {
+  return {
+    auth: {
+      publicAuthMode: "public",
+      adminAuthModes: ["local"],
+      allowedIpRanges: [],
+      ldap: {
+        url: "",
+        baseDn: "",
+        bindDn: "",
+        bindPassword: "",
+        userFilter: "(uid={username})",
+        usernameAttribute: "uid",
+        displayNameAttribute: "displayName",
+        emailAttribute: "mail"
+      },
+      remoteAuth: {
+        userinfoUrl: "",
+        introspectionUrl: "",
+        clientId: "",
+        clientSecret: "",
+        usernameClaim: "preferred_username",
+        displayNameClaim: "name",
+        emailClaim: "email"
+      },
+      oidc: {
+        issuerUrl: "",
+        clientId: "",
+        clientSecret: "",
+        scopes: ["openid", "profile", "email"],
+        usernameClaim: "preferred_username",
+        displayNameClaim: "name",
+        emailClaim: "email",
+        prompt: "",
+        useUserInfo: true
+      },
+      saml: {
+        entryPoint: "",
+        issuer: "service-levels-application",
+        idpCert: "",
+        privateKey: "",
+        publicCert: "",
+        nameIdAttribute: "nameid",
+        displayNameAttribute: "displayName",
+        emailAttribute: "mail"
+      }
+    },
+    notifications: {
+      slackWebhookUrl: "",
+      smtpHost: "",
+      smtpPort: 587,
+      smtpUser: "",
+      smtpPassword: "",
+      smtpFrom: ""
+    }
   };
 }
 
@@ -295,6 +355,7 @@ function primeAuthenticatedAdminMocks(view = buildStatusView()): void {
   mockApi.colors.mockResolvedValue(view.colors);
   mockApi.tabs.mockResolvedValue(view.tabs);
   mockApi.connectors.mockResolvedValue(view.connectors);
+  mockApi.platformSettings.mockResolvedValue(buildPlatformSettings());
   mockApi.collectionHealth.mockResolvedValue({
     generatedAt: "2026-04-20T10:05:00.000Z",
     tenants: [
@@ -405,6 +466,27 @@ describe("status UI", () => {
     expect(screen.getByText("Deploying Prometheus rules.")).toBeInTheDocument();
     expect(screen.getAllByText("Core Router").length).toBeGreaterThan(0);
     expect(screen.getByText(/Investigating transient route instability/)).toBeInTheDocument();
+  });
+
+  it("toggles and persists dark mode on the Cachet-style status page", async () => {
+    mockApi.status.mockResolvedValue(buildStatusView());
+
+    render(
+      <MemoryRouter>
+        <StatusPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("Metrics Pipeline")).toBeInTheDocument();
+    expect(document.documentElement.dataset.theme).toBe("light");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dark mode" }));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(document.cookie).toContain("ess_theme=dark");
+
+    fireEvent.click(screen.getByRole("button", { name: "Light mode" }));
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(document.cookie).toContain("ess_theme=light");
   });
 
   it("supports local status-page authentication and then renders the snapshot", async () => {
@@ -630,6 +712,7 @@ describe("admin UI", () => {
     mockApi.createUser.mockResolvedValue({ id: "user-new", username: "newuser", displayName: "New User", email: "new@example.org", authType: "local", isAdmin: false, enabled: true });
     mockApi.promoteUser.mockResolvedValue({ id: "user-ops", username: "ops", displayName: "Ops", email: "ops@example.org", authType: "ldap", isAdmin: true, enabled: true });
     mockApi.demoteUser.mockResolvedValue({ id: "user-ops", username: "ops", displayName: "Ops", email: "ops@example.org", authType: "ldap", isAdmin: false, enabled: true });
+    mockApi.updatePlatformSettings.mockImplementation(async (body: PlatformSettings) => body);
     mockApi.createSubscription.mockResolvedValue(view.subscriptions[0]);
     mockApi.deleteSubscription.mockResolvedValue({ ok: true });
     mockApi.updateBranding.mockResolvedValue(view.meta);
@@ -653,9 +736,16 @@ describe("admin UI", () => {
     expect(await screen.findByText(/Authenticated admin session active/)).toBeInTheDocument();
     expect(screen.getByText("Collection health")).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: "Identity Provider" }));
+    expect(screen.getByText("Identity provider configuration")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Configure IdP" }));
+    let dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(/Define the external IdP here/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+
     fireEvent.click(screen.getByRole("button", { name: "Tenants" }));
     fireEvent.click(screen.getByRole("button", { name: "Create tenant" }));
-    let dialog = screen.getByRole("dialog");
+    dialog = screen.getByRole("dialog");
     let tenantScope = within(dialog);
     fireEvent.change(tenantScope.getByLabelText("Tenant name"), { target: { value: "New Site" } });
     fireEvent.change(tenantScope.getByLabelText("URL slug"), { target: { value: "new-site" } });
@@ -705,6 +795,28 @@ describe("admin UI", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Access" }));
+    const authPanel = screen.getByText("Authentication settings").closest(".panel");
+    expect(authPanel).not.toBeNull();
+    fireEvent.click(within(authPanel as HTMLElement).getByRole("button", { name: "Edit" }));
+    dialog = screen.getByRole("dialog");
+    const authSettingsScope = within(dialog);
+    fireEvent.change(authSettingsScope.getByLabelText("Status page access"), { target: { value: "oidc" } });
+    fireEvent.click(authSettingsScope.getByLabelText("OpenID Connect"));
+    fireEvent.change(authSettingsScope.getByLabelText("OIDC issuer URL"), { target: { value: "https://idp.example.org" } });
+    fireEvent.change(authSettingsScope.getByLabelText("Client ID"), { target: { value: "service-levels" } });
+    fireEvent.click(authSettingsScope.getByRole("button", { name: "Save authentication settings" }));
+    await waitFor(() => {
+      expect(mockApi.updatePlatformSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          auth: expect.objectContaining({
+            publicAuthMode: "oidc",
+            adminAuthModes: expect.arrayContaining(["local", "oidc"]),
+            oidc: expect.objectContaining({ issuerUrl: "https://idp.example.org", clientId: "service-levels" })
+          })
+        })
+      );
+    });
+
     fireEvent.click(screen.getByRole("button", { name: "Create user" }));
     dialog = screen.getByRole("dialog");
     const usersScope = within(dialog);
@@ -733,6 +845,22 @@ describe("admin UI", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    const deliveryPanel = screen.getByText("Delivery settings").closest(".panel");
+    expect(deliveryPanel).not.toBeNull();
+    fireEvent.click(within(deliveryPanel as HTMLElement).getByRole("button", { name: "Edit" }));
+    dialog = screen.getByRole("dialog");
+    const deliveryScope = within(dialog);
+    fireEvent.change(deliveryScope.getByLabelText("Host"), { target: { value: "smtp.example.org" } });
+    fireEvent.change(deliveryScope.getByLabelText("From address"), { target: { value: "status@example.org" } });
+    fireEvent.click(deliveryScope.getByRole("button", { name: "Save notification settings" }));
+    await waitFor(() => {
+      expect(mockApi.updatePlatformSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          notifications: expect.objectContaining({ smtpHost: "smtp.example.org", smtpFrom: "status@example.org" })
+        })
+      );
+    });
+
     fireEvent.click(screen.getByRole("button", { name: "Create subscription" }));
     dialog = screen.getByRole("dialog");
     const notificationsScope = within(dialog);

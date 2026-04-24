@@ -12,6 +12,7 @@ import type {
   IntegrationConnector,
   MaintenanceWindow,
   NotificationSubscription,
+  PlatformSettings,
   ServiceDefinition,
   StatusLevel,
   StatusView,
@@ -134,6 +135,67 @@ export function authModeUsesRedirect(mode: AuthMode): boolean {
 
 export function currentReturnPath(): string {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
+const authModeChoices: AuthMode[] = ["public", "ip", "local", "ldap", "saml", "oauth", "oidc"];
+const adminAuthModeChoices: AuthMode[] = ["local", "ldap", "saml", "oauth", "oidc"];
+
+function defaultPlatformSettings(): PlatformSettings {
+  return {
+    auth: {
+      publicAuthMode: "public",
+      adminAuthModes: ["local"],
+      allowedIpRanges: [],
+      ldap: {
+        url: "",
+        baseDn: "",
+        bindDn: "",
+        bindPassword: "",
+        userFilter: "(uid={username})",
+        usernameAttribute: "uid",
+        displayNameAttribute: "displayName",
+        emailAttribute: "mail"
+      },
+      remoteAuth: {
+        userinfoUrl: "",
+        introspectionUrl: "",
+        clientId: "",
+        clientSecret: "",
+        usernameClaim: "preferred_username",
+        displayNameClaim: "name",
+        emailClaim: "email"
+      },
+      oidc: {
+        issuerUrl: "",
+        clientId: "",
+        clientSecret: "",
+        scopes: ["openid", "profile", "email"],
+        usernameClaim: "preferred_username",
+        displayNameClaim: "name",
+        emailClaim: "email",
+        prompt: "",
+        useUserInfo: true
+      },
+      saml: {
+        entryPoint: "",
+        issuer: "service-levels-application",
+        idpCert: "",
+        privateKey: "",
+        publicCert: "",
+        nameIdAttribute: "nameid",
+        displayNameAttribute: "displayName",
+        emailAttribute: "mail"
+      }
+    },
+    notifications: {
+      slackWebhookUrl: "",
+      smtpHost: "",
+      smtpPort: 587,
+      smtpUser: "",
+      smtpPassword: "",
+      smtpFrom: ""
+    }
+  };
 }
 
 export const browserRedirect = {
@@ -557,8 +619,8 @@ export function StatusPage() {
   );
 }
 
-type AdminSection = "overview" | "tenants" | "banners" | "connectors" | "notifications" | "access" | "appearance";
-type AdminModal = "tenant" | "banner" | "connector" | "user" | "subscription" | "branding" | "tab" | "colors" | null;
+type AdminSection = "overview" | "tenants" | "banners" | "connectors" | "notifications" | "access" | "identity" | "appearance";
+type AdminModal = "tenant" | "banner" | "connector" | "user" | "subscription" | "branding" | "tab" | "colors" | "auth-settings" | "notification-settings" | null;
 
 const adminSections: Array<{ id: AdminSection; label: string }> = [
   { id: "overview", label: "Overview" },
@@ -567,6 +629,7 @@ const adminSections: Array<{ id: AdminSection; label: string }> = [
   { id: "connectors", label: "Connectors" },
   { id: "notifications", label: "Notifications" },
   { id: "access", label: "Access" },
+  { id: "identity", label: "Identity Provider" },
   { id: "appearance", label: "Appearance" }
 ];
 
@@ -689,6 +752,9 @@ export function AdminPage() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [maintenance, setMaintenance] = useState<MaintenanceWindow[]>([]);
   const [subscriptions, setSubscriptions] = useState<NotificationSubscription[]>([]);
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings>(defaultPlatformSettings());
+  const [authSettingsForm, setAuthSettingsForm] = useState<PlatformSettings["auth"]>(defaultPlatformSettings().auth);
+  const [notificationSettingsForm, setNotificationSettingsForm] = useState<PlatformSettings["notifications"]>(defaultPlatformSettings().notifications);
   const [collectionHealth, setCollectionHealth] = useState<{
     generatedAt: string;
     tenants: Array<{
@@ -761,7 +827,20 @@ export function AdminPage() {
     currentSession: { user: unknown; meta: AppMeta & { adminAuthModes: AuthMode[] } } | null = me,
     targetTenantSlug = tenantSlug
   ): Promise<void> {
-    const [meta, view, brandingValue, colorValues, tabValues, connectorValues, healthValue, userValues, incidentValues, maintenanceValues, subscriptionValues] = await Promise.all([
+    const [
+      meta,
+      view,
+      brandingValue,
+      colorValues,
+      tabValues,
+      connectorValues,
+      healthValue,
+      userValues,
+      incidentValues,
+      maintenanceValues,
+      subscriptionValues,
+      platformSettingsValue
+    ] = await Promise.all([
       api.meta(),
       api.status(targetTenantSlug),
       api.branding(),
@@ -772,7 +851,8 @@ export function AdminPage() {
       api.users(),
       api.incidents(targetTenantSlug),
       api.maintenance(targetTenantSlug),
-      api.subscriptions(targetTenantSlug)
+      api.subscriptions(targetTenantSlug),
+      api.platformSettings().catch(() => platformSettings)
     ]);
     setStatus(view);
     setBranding(brandingValue);
@@ -784,6 +864,9 @@ export function AdminPage() {
     setIncidents(incidentValues);
     setMaintenance(maintenanceValues);
     setSubscriptions(subscriptionValues);
+    setPlatformSettings(platformSettingsValue);
+    setAuthSettingsForm(platformSettingsValue.auth);
+    setNotificationSettingsForm(platformSettingsValue.notifications);
     setMe(currentSession ? { ...currentSession, meta } : currentSession);
   }
 
@@ -852,6 +935,73 @@ export function AdminPage() {
     setMessage("Color mapping updated.");
     setAdminModal(null);
     await refresh();
+  }
+
+  function setAuthSetting<K extends keyof PlatformSettings["auth"]>(key: K, value: PlatformSettings["auth"][K]): void {
+    setAuthSettingsForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function setLdapSetting<K extends keyof PlatformSettings["auth"]["ldap"]>(key: K, value: PlatformSettings["auth"]["ldap"][K]): void {
+    setAuthSettingsForm((current) => ({ ...current, ldap: { ...current.ldap, [key]: value } }));
+  }
+
+  function setRemoteAuthSetting<K extends keyof PlatformSettings["auth"]["remoteAuth"]>(key: K, value: PlatformSettings["auth"]["remoteAuth"][K]): void {
+    setAuthSettingsForm((current) => ({ ...current, remoteAuth: { ...current.remoteAuth, [key]: value } }));
+  }
+
+  function setOidcSetting<K extends keyof PlatformSettings["auth"]["oidc"]>(key: K, value: PlatformSettings["auth"]["oidc"][K]): void {
+    setAuthSettingsForm((current) => ({ ...current, oidc: { ...current.oidc, [key]: value } }));
+  }
+
+  function setSamlSetting<K extends keyof PlatformSettings["auth"]["saml"]>(key: K, value: PlatformSettings["auth"]["saml"][K]): void {
+    setAuthSettingsForm((current) => ({ ...current, saml: { ...current.saml, [key]: value } }));
+  }
+
+  function setNotificationSetting<K extends keyof PlatformSettings["notifications"]>(
+    key: K,
+    value: PlatformSettings["notifications"][K]
+  ): void {
+    setNotificationSettingsForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function toggleAdminAuthMode(mode: AuthMode): void {
+    setAuthSettingsForm((current) => ({
+      ...current,
+      adminAuthModes: current.adminAuthModes.includes(mode)
+        ? current.adminAuthModes.filter((entry) => entry !== mode)
+        : [...current.adminAuthModes, mode]
+    }));
+  }
+
+  async function handleAuthSettingsSave(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (authSettingsForm.adminAuthModes.length === 0) {
+      setMessage("Select at least one admin authentication mode.");
+      return;
+    }
+    const updated = await api.updatePlatformSettings({
+      ...platformSettings,
+      auth: authSettingsForm
+    });
+    setPlatformSettings(updated);
+    setAuthSettingsForm(updated.auth);
+    setAuthOptions(await api.authOptions());
+    setMessage("Authentication settings updated.");
+    setAdminModal(null);
+    await refresh(me, tenantSlug);
+  }
+
+  async function handleNotificationSettingsSave(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const updated = await api.updatePlatformSettings({
+      ...platformSettings,
+      notifications: notificationSettingsForm
+    });
+    setPlatformSettings(updated);
+    setNotificationSettingsForm(updated.notifications);
+    setMessage("Notification delivery settings updated.");
+    setAdminModal(null);
+    await refresh(me, tenantSlug);
   }
 
   async function handleTenantSave(event: React.FormEvent<HTMLFormElement>): Promise<void> {
@@ -1140,6 +1290,24 @@ export function AdminPage() {
     setAdminModal("subscription");
   }
 
+  function openAuthSettings(): void {
+    setAuthSettingsForm(platformSettings.auth);
+    setActiveAdminSection("access");
+    setAdminModal("auth-settings");
+  }
+
+  function openIdentityProviderSettings(): void {
+    setAuthSettingsForm(platformSettings.auth);
+    setActiveAdminSection("identity");
+    setAdminModal("auth-settings");
+  }
+
+  function openNotificationSettings(): void {
+    setNotificationSettingsForm(platformSettings.notifications);
+    setActiveAdminSection("notifications");
+    setAdminModal("notification-settings");
+  }
+
   function openTabCreate(): void {
     setTabForm({ title: "", filterQuery: "", isGlobal: false });
     setActiveAdminSection("appearance");
@@ -1383,6 +1551,29 @@ export function AdminPage() {
               <div className="section-scheduled">
                 <div className="panel panel-default">
                   <div className="panel-heading cachet-panel-actions">
+                    <strong>Delivery settings</strong>
+                    <button className="btn btn-link" type="button" onClick={openNotificationSettings}>
+                      Edit
+                    </button>
+                  </div>
+                  <div className="list-group">
+                    <div className="list-group-item">
+                      <strong>SMTP server</strong>
+                      <div className="cachet-row-meta">
+                        {platformSettings.notifications.smtpHost
+                          ? `${platformSettings.notifications.smtpHost}:${platformSettings.notifications.smtpPort} · from ${platformSettings.notifications.smtpFrom || "not set"}`
+                          : "Not configured"}
+                      </div>
+                    </div>
+                    <div className="list-group-item">
+                      <strong>Global Slack webhook</strong>
+                      <div className="cachet-row-meta">{platformSettings.notifications.slackWebhookUrl ? "Configured" : "Not configured"}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="panel panel-default">
+                  <div className="panel-heading cachet-panel-actions">
                     <strong>Notifications</strong>
                     <button className="btn btn-success" type="button" onClick={openSubscriptionCreate}>
                       Create subscription
@@ -1413,6 +1604,37 @@ export function AdminPage() {
               <div className="section-scheduled">
                 <div className="panel panel-default">
                   <div className="panel-heading cachet-panel-actions">
+                    <strong>Authentication settings</strong>
+                    <button className="btn btn-link" type="button" onClick={openAuthSettings}>
+                      Edit
+                    </button>
+                  </div>
+                  <div className="list-group">
+                    <div className="list-group-item">
+                      <strong>Status page access</strong>
+                      <div className="cachet-row-meta">{authModeLabel(platformSettings.auth.publicAuthMode)}</div>
+                    </div>
+                    <div className="list-group-item">
+                      <strong>Admin sign-in modes</strong>
+                      <div className="cachet-row-meta">{platformSettings.auth.adminAuthModes.map(authModeLabel).join(", ") || "No admin modes configured"}</div>
+                    </div>
+                    <div className="list-group-item">
+                      <strong>Identity provider</strong>
+                      <div className="cachet-row-meta">
+                        {platformSettings.auth.oidc.issuerUrl
+                          ? `OIDC ${platformSettings.auth.oidc.issuerUrl}`
+                          : platformSettings.auth.saml.entryPoint
+                            ? `SAML ${platformSettings.auth.saml.entryPoint}`
+                            : platformSettings.auth.ldap.url
+                              ? `LDAP ${platformSettings.auth.ldap.url}`
+                              : "Not configured"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="panel panel-default">
+                  <div className="panel-heading cachet-panel-actions">
                     <strong>Users</strong>
                     <button className="btn btn-success" type="button" onClick={openUserCreate}>
                       Create user
@@ -1439,6 +1661,82 @@ export function AdminPage() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeAdminSection === "identity" && (
+              <div className="section-scheduled">
+                <div className="panel panel-default">
+                  <div className="panel-heading cachet-panel-actions">
+                    <strong>Identity provider configuration</strong>
+                    <button className="btn btn-success" type="button" onClick={openIdentityProviderSettings}>
+                      Configure IdP
+                    </button>
+                  </div>
+                  <div className="list-group">
+                    <div className="list-group-item">
+                      <strong>OpenID Connect / OAuth2</strong>
+                      <div className="pull-right">
+                        <button className="btn btn-link" type="button" onClick={openIdentityProviderSettings}>
+                          Edit
+                        </button>
+                      </div>
+                      <div className="cachet-row-meta">
+                        {platformSettings.auth.oidc.issuerUrl
+                          ? `${platformSettings.auth.oidc.issuerUrl} · client ${platformSettings.auth.oidc.clientId || "not set"}`
+                          : platformSettings.auth.remoteAuth.userinfoUrl || platformSettings.auth.remoteAuth.introspectionUrl
+                            ? `OAuth2 token endpoints configured · client ${platformSettings.auth.remoteAuth.clientId || "not set"}`
+                            : "Not configured"}
+                      </div>
+                    </div>
+                    <div className="list-group-item">
+                      <strong>SAML 2.0</strong>
+                      <div className="pull-right">
+                        <button className="btn btn-link" type="button" onClick={openIdentityProviderSettings}>
+                          Edit
+                        </button>
+                      </div>
+                      <div className="cachet-row-meta">
+                        {platformSettings.auth.saml.entryPoint
+                          ? `${platformSettings.auth.saml.entryPoint} · issuer ${platformSettings.auth.saml.issuer || "not set"}`
+                          : "Not configured"}
+                      </div>
+                    </div>
+                    <div className="list-group-item">
+                      <strong>LDAP directory</strong>
+                      <div className="pull-right">
+                        <button className="btn btn-link" type="button" onClick={openIdentityProviderSettings}>
+                          Edit
+                        </button>
+                      </div>
+                      <div className="cachet-row-meta">
+                        {platformSettings.auth.ldap.url
+                          ? `${platformSettings.auth.ldap.url} · base ${platformSettings.auth.ldap.baseDn || "not set"}`
+                          : "Not configured"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="panel panel-default">
+                  <div className="panel-heading">
+                    <strong>Provider URLs</strong>
+                  </div>
+                  <div className="list-group">
+                    <div className="list-group-item">
+                      <strong>OIDC callback</strong>
+                      <div className="cachet-row-meta">/api/v1/auth/sso/oidc/callback</div>
+                    </div>
+                    <div className="list-group-item">
+                      <strong>SAML callback</strong>
+                      <div className="cachet-row-meta">/api/v1/auth/sso/saml/callback</div>
+                    </div>
+                    <div className="list-group-item">
+                      <strong>SAML metadata</strong>
+                      <div className="cachet-row-meta">/api/v1/auth/sso/saml/metadata</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1624,6 +1922,234 @@ export function AdminPage() {
             </label>
             <button className="btn btn-success" type="submit">
               Create subscription
+            </button>
+          </form>
+        </ModalFrame>
+      )}
+
+      {adminModal === "notification-settings" && (
+        <ModalFrame title="Notification delivery settings" description="Configure outbound Slack and SMTP delivery used by subscriptions and status transitions." onClose={closeAdminModal}>
+          <form className="cachet-form" onSubmit={handleNotificationSettingsSave}>
+            <label>
+              Global Slack webhook URL
+              <input value={notificationSettingsForm.slackWebhookUrl} onChange={(event) => setNotificationSetting("slackWebhookUrl", event.target.value)} placeholder="https://hooks.slack.com/..." />
+            </label>
+            <div className="cachet-form-section">
+              <h3>SMTP server</h3>
+              <label>
+                Host
+                <input value={notificationSettingsForm.smtpHost} onChange={(event) => setNotificationSetting("smtpHost", event.target.value)} placeholder="smtp.example.org" />
+              </label>
+              <label>
+                Port
+                <input type="number" min={1} max={65535} value={notificationSettingsForm.smtpPort} onChange={(event) => setNotificationSetting("smtpPort", Number(event.target.value) || 587)} />
+              </label>
+              <label>
+                Username
+                <input value={notificationSettingsForm.smtpUser} onChange={(event) => setNotificationSetting("smtpUser", event.target.value)} />
+              </label>
+              <label>
+                Password
+                <input type="password" value={notificationSettingsForm.smtpPassword} onChange={(event) => setNotificationSetting("smtpPassword", event.target.value)} />
+              </label>
+              <label>
+                From address
+                <input type="email" value={notificationSettingsForm.smtpFrom} onChange={(event) => setNotificationSetting("smtpFrom", event.target.value)} placeholder="status@example.org" />
+              </label>
+            </div>
+            <button className="btn btn-success" type="submit">
+              Save notification settings
+            </button>
+          </form>
+        </ModalFrame>
+      )}
+
+      {adminModal === "auth-settings" && (
+        <ModalFrame title="Authentication and identity provider settings" description="Define the external IdP here: OIDC/OAuth2 issuer and client credentials, SAML IdP metadata, or LDAP directory settings." onClose={closeAdminModal}>
+          <form className="cachet-form" onSubmit={handleAuthSettingsSave}>
+            <div className="cachet-form-section">
+              <h3>Access modes</h3>
+              <label>
+                Status page access
+                <select value={authSettingsForm.publicAuthMode} onChange={(event) => setAuthSetting("publicAuthMode", event.target.value as AuthMode)}>
+                  {authModeChoices.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {authModeLabel(mode)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                IP allowlist
+                <input value={authSettingsForm.allowedIpRanges.join(", ")} onChange={(event) => setAuthSetting("allowedIpRanges", event.target.value.split(/[,\n]/).map((entry) => entry.trim()).filter(Boolean))} placeholder="192.0.2.0/24, 2001:db8::/32" />
+                <span className="field-help">Used when the status page access mode is IP allowlist.</span>
+              </label>
+              <div className="cachet-checkbox-group">
+                <strong>Admin sign-in modes</strong>
+                {adminAuthModeChoices.map((mode) => (
+                  <label key={mode} className="checkbox-row">
+                    <input type="checkbox" checked={authSettingsForm.adminAuthModes.includes(mode)} onChange={() => toggleAdminAuthMode(mode)} />
+                    {authModeLabel(mode)}
+                  </label>
+                ))}
+                <span className="field-help">Keep Local enabled until the remote IdP has been tested to avoid lockout.</span>
+              </div>
+            </div>
+
+            <div className="cachet-form-section">
+              <h3>LDAP</h3>
+              <label>
+                LDAP URL
+                <input value={authSettingsForm.ldap.url} onChange={(event) => setLdapSetting("url", event.target.value)} placeholder="ldaps://ldap.example.org" />
+              </label>
+              <label>
+                Base DN
+                <input value={authSettingsForm.ldap.baseDn} onChange={(event) => setLdapSetting("baseDn", event.target.value)} placeholder="ou=people,dc=example,dc=org" />
+              </label>
+              <label>
+                Bind DN
+                <input value={authSettingsForm.ldap.bindDn} onChange={(event) => setLdapSetting("bindDn", event.target.value)} />
+              </label>
+              <label>
+                Bind password
+                <input type="password" value={authSettingsForm.ldap.bindPassword} onChange={(event) => setLdapSetting("bindPassword", event.target.value)} />
+              </label>
+              <label>
+                User filter
+                <input value={authSettingsForm.ldap.userFilter} onChange={(event) => setLdapSetting("userFilter", event.target.value)} placeholder="(uid={username})" />
+              </label>
+              <div className="cachet-form-grid">
+                <label>
+                  Username attribute
+                  <input value={authSettingsForm.ldap.usernameAttribute} onChange={(event) => setLdapSetting("usernameAttribute", event.target.value)} />
+                </label>
+                <label>
+                  Display name attribute
+                  <input value={authSettingsForm.ldap.displayNameAttribute} onChange={(event) => setLdapSetting("displayNameAttribute", event.target.value)} />
+                </label>
+                <label>
+                  Email attribute
+                  <input value={authSettingsForm.ldap.emailAttribute} onChange={(event) => setLdapSetting("emailAttribute", event.target.value)} />
+                </label>
+              </div>
+            </div>
+
+            <div className="cachet-form-section">
+              <h3>OIDC and OAuth2</h3>
+              <label>
+                OIDC issuer URL
+                <input value={authSettingsForm.oidc.issuerUrl} onChange={(event) => setOidcSetting("issuerUrl", event.target.value)} placeholder="https://idp.example.org/.well-known/openid-configuration" />
+              </label>
+              <div className="cachet-form-grid">
+                <label>
+                  Client ID
+                  <input value={authSettingsForm.oidc.clientId} onChange={(event) => setOidcSetting("clientId", event.target.value)} />
+                </label>
+                <label>
+                  Client secret
+                  <input type="password" value={authSettingsForm.oidc.clientSecret} onChange={(event) => setOidcSetting("clientSecret", event.target.value)} />
+                </label>
+              </div>
+              <label>
+                Scopes
+                <input value={authSettingsForm.oidc.scopes.join(" ")} onChange={(event) => setOidcSetting("scopes", event.target.value.split(/\s+/).map((entry) => entry.trim()).filter(Boolean))} />
+              </label>
+              <div className="cachet-form-grid">
+                <label>
+                  Username claim
+                  <input value={authSettingsForm.oidc.usernameClaim} onChange={(event) => setOidcSetting("usernameClaim", event.target.value)} />
+                </label>
+                <label>
+                  Display claim
+                  <input value={authSettingsForm.oidc.displayNameClaim} onChange={(event) => setOidcSetting("displayNameClaim", event.target.value)} />
+                </label>
+                <label>
+                  Email claim
+                  <input value={authSettingsForm.oidc.emailClaim} onChange={(event) => setOidcSetting("emailClaim", event.target.value)} />
+                </label>
+              </div>
+              <label>
+                Prompt
+                <input value={authSettingsForm.oidc.prompt} onChange={(event) => setOidcSetting("prompt", event.target.value)} placeholder="login consent" />
+              </label>
+              <label className="checkbox-row">
+                <input type="checkbox" checked={authSettingsForm.oidc.useUserInfo} onChange={(event) => setOidcSetting("useUserInfo", event.target.checked)} />
+                Fetch userinfo after token exchange
+              </label>
+              <label>
+                OAuth2 userinfo URL
+                <input value={authSettingsForm.remoteAuth.userinfoUrl} onChange={(event) => setRemoteAuthSetting("userinfoUrl", event.target.value)} />
+              </label>
+              <label>
+                OAuth2 introspection URL
+                <input value={authSettingsForm.remoteAuth.introspectionUrl} onChange={(event) => setRemoteAuthSetting("introspectionUrl", event.target.value)} />
+              </label>
+              <div className="cachet-form-grid">
+                <label>
+                  OAuth2 client ID
+                  <input value={authSettingsForm.remoteAuth.clientId} onChange={(event) => setRemoteAuthSetting("clientId", event.target.value)} />
+                </label>
+                <label>
+                  OAuth2 client secret
+                  <input type="password" value={authSettingsForm.remoteAuth.clientSecret} onChange={(event) => setRemoteAuthSetting("clientSecret", event.target.value)} />
+                </label>
+              </div>
+              <div className="cachet-form-grid">
+                <label>
+                  Username claim
+                  <input value={authSettingsForm.remoteAuth.usernameClaim} onChange={(event) => setRemoteAuthSetting("usernameClaim", event.target.value)} />
+                </label>
+                <label>
+                  Display claim
+                  <input value={authSettingsForm.remoteAuth.displayNameClaim} onChange={(event) => setRemoteAuthSetting("displayNameClaim", event.target.value)} />
+                </label>
+                <label>
+                  Email claim
+                  <input value={authSettingsForm.remoteAuth.emailClaim} onChange={(event) => setRemoteAuthSetting("emailClaim", event.target.value)} />
+                </label>
+              </div>
+            </div>
+
+            <div className="cachet-form-section">
+              <h3>SAML</h3>
+              <label>
+                IdP entry point
+                <input value={authSettingsForm.saml.entryPoint} onChange={(event) => setSamlSetting("entryPoint", event.target.value)} placeholder="https://idp.example.org/saml/sso" />
+              </label>
+              <label>
+                Service provider issuer
+                <input value={authSettingsForm.saml.issuer} onChange={(event) => setSamlSetting("issuer", event.target.value)} />
+              </label>
+              <label>
+                IdP certificate
+                <textarea rows={5} value={authSettingsForm.saml.idpCert} onChange={(event) => setSamlSetting("idpCert", event.target.value)} />
+              </label>
+              <label>
+                SP private key
+                <textarea rows={5} value={authSettingsForm.saml.privateKey} onChange={(event) => setSamlSetting("privateKey", event.target.value)} />
+              </label>
+              <label>
+                SP public certificate
+                <textarea rows={5} value={authSettingsForm.saml.publicCert} onChange={(event) => setSamlSetting("publicCert", event.target.value)} />
+              </label>
+              <div className="cachet-form-grid">
+                <label>
+                  Name ID attribute
+                  <input value={authSettingsForm.saml.nameIdAttribute} onChange={(event) => setSamlSetting("nameIdAttribute", event.target.value)} />
+                </label>
+                <label>
+                  Display attribute
+                  <input value={authSettingsForm.saml.displayNameAttribute} onChange={(event) => setSamlSetting("displayNameAttribute", event.target.value)} />
+                </label>
+                <label>
+                  Email attribute
+                  <input value={authSettingsForm.saml.emailAttribute} onChange={(event) => setSamlSetting("emailAttribute", event.target.value)} />
+                </label>
+              </div>
+            </div>
+
+            <button className="btn btn-success" type="submit">
+              Save authentication settings
             </button>
           </form>
         </ModalFrame>

@@ -9,6 +9,7 @@ import type {
   ServiceDefinition,
   MaintenanceWindow,
   NotificationSubscription,
+  PlatformSettings,
   Snapshot,
   StatusDailySummary,
   StatusLevel,
@@ -16,6 +17,7 @@ import type {
   Tenant
 } from "@service-levels/shared";
 import type { AppConfig } from "../config.js";
+import { platformSettingsFromConfig } from "../settings.js";
 import { nowIso } from "../utils.js";
 import { utcDayKey } from "./utils.js";
 
@@ -34,6 +36,7 @@ export type SeedState = {
   snapshots: Snapshot[];
   dailySummaries: StatusDailySummary[];
   users: AdminUser[];
+  platformSettings: PlatformSettings;
 };
 
 export function buildSeedState(config: AppConfig): SeedState {
@@ -309,6 +312,7 @@ export function buildSeedState(config: AppConfig): SeedState {
         isAdmin: true,
         enabled: true
       }
-    ]
+    ],
+    platformSettings: platformSettingsFromConfig(config)
   };
 }

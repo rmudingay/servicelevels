@@ -8,7 +8,7 @@ import { PostgresStore } from "../src/store/postgres-store.js";
 
 async function createTestSchema(pool: Pool, config: ReturnType<typeof loadConfig>): Promise<void> {
   const statements = [
-    "CREATE TABLE app_settings (id integer PRIMARY KEY, app_name text, logo_url text, favicon_url text, theme_default text)",
+    "CREATE TABLE app_settings (id integer PRIMARY KEY, app_name text, logo_url text, favicon_url text, theme_default text, auth_settings_json jsonb, notification_settings_json jsonb)",
     "CREATE TABLE tenants (id text PRIMARY KEY, slug text, name text, description text, enabled boolean)",
     "CREATE TABLE tabs (id text PRIMARY KEY, tenant_id text, title text, slug text, sort_order integer, filter_query text, is_global boolean, enabled boolean)",
     "CREATE TABLE services (id text PRIMARY KEY, tenant_id text, name text, slug text, category text, topic text, tags jsonb, source_type text, source_ref text, enabled boolean)",
