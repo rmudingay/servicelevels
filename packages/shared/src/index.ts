@@ -54,6 +54,7 @@ export interface IntegrationConnector {
   pollIntervalSeconds: number;
   lastSuccessAt: string | null;
   lastErrorAt: string | null;
+  lastErrorMessage: string | null;
 }
 
 export interface Banner {

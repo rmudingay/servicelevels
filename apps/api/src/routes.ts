@@ -16,7 +16,7 @@ import type { AppConfig } from "./config.js";
 import { normalizePlatformSettings, resolveEffectiveConfig } from "./settings.js";
 import type { StatusRepository } from "./store/types.js";
 import { nowIso, slugify } from "./utils.js";
-import type { Banner, StatusLevel, Tenant } from "@service-levels/shared";
+import type { Banner, IntegrationConnector, StatusLevel, Tenant } from "@service-levels/shared";
 import { ingestWebhookEvent } from "./worker/pipeline.js";
 
 async function buildRss(store: StatusRepository, tenantSlug?: string): Promise<string> {
@@ -108,6 +108,25 @@ function computeNextDueAt(lastSuccessAt: string | null, lastErrorAt: string | nu
   const due = new Date(anchor);
   due.setSeconds(due.getSeconds() + pollIntervalSeconds);
   return due.toISOString();
+}
+
+function normalizeJsonPayload(value: unknown, fieldName: string, fallback: string): { value: string } | { error: string } {
+  const candidate = value === undefined ? fallback : value;
+  if (typeof candidate === "string") {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return { error: `${fieldName} must be a JSON object` };
+      }
+      return { value: candidate };
+    } catch {
+      return { error: `${fieldName} must contain valid JSON` };
+    }
+  }
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return { error: `${fieldName} must be a JSON object` };
+  }
+  return { value: JSON.stringify(candidate) };
 }
 
 function isMainAdmin(request: { user?: { username: string } }, config: AppConfig): boolean {
@@ -525,18 +544,28 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
       reply.code(400).send({ error: "Tenant, type, and name are required" });
       return;
     }
+    const configJson = normalizeJsonPayload(body.configJson, "Config JSON", "{}");
+    if ("error" in configJson) {
+      reply.code(400).send({ error: configJson.error });
+      return;
+    }
+    const authJson = normalizeJsonPayload(body.authJson, "Auth JSON", "{}");
+    if ("error" in authJson) {
+      reply.code(400).send({ error: authJson.error });
+      return;
+    }
     const connector = await store.createConnector(tenant.id, {
       type: body.type as "zabbix" | "prometheus" | "prtg" | "webhook",
       name: body.name,
-      configJson: body.configJson ?? "{}",
-      authJson: body.authJson ?? "{}",
+      configJson: configJson.value,
+      authJson: authJson.value,
       enabled: body.enabled ?? true,
       pollIntervalSeconds: body.pollIntervalSeconds ?? 300
     });
     reply.code(201).send(connector);
   });
 
-  app.patch("/api/v1/admin/connectors/:id", { preHandler: requireAdmin(store, config) }, async (request) => {
+  app.patch("/api/v1/admin/connectors/:id", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
     const params = request.params as { id: string };
     const body = request.body as Partial<{
       type: "zabbix" | "prometheus" | "prtg" | "webhook";
@@ -546,7 +575,24 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
       enabled: boolean;
       pollIntervalSeconds: number;
     }>;
-    return store.updateConnector(params.id, body);
+    const patch: Partial<IntegrationConnector> = { ...body };
+    if (body.configJson !== undefined) {
+      const configJson = normalizeJsonPayload(body.configJson, "Config JSON", "{}");
+      if ("error" in configJson) {
+        reply.code(400).send({ error: configJson.error });
+        return;
+      }
+      patch.configJson = configJson.value;
+    }
+    if (body.authJson !== undefined) {
+      const authJson = normalizeJsonPayload(body.authJson, "Auth JSON", "{}");
+      if ("error" in authJson) {
+        reply.code(400).send({ error: authJson.error });
+        return;
+      }
+      patch.authJson = authJson.value;
+    }
+    return store.updateConnector(params.id, patch);
   });
 
   app.delete("/api/v1/admin/connectors/:id", { preHandler: requireAdmin(store, config) }, async (request, reply) => {
@@ -778,6 +824,7 @@ export async function registerRoutes(app: FastifyInstance, store: StatusReposito
                 pollIntervalSeconds: connector.pollIntervalSeconds,
                 lastSuccessAt: connector.lastSuccessAt,
                 lastErrorAt: connector.lastErrorAt,
+                lastErrorMessage: connector.lastErrorMessage,
                 nextDueAt: connector.type === "webhook" ? null : computeNextDueAt(connector.lastSuccessAt, connector.lastErrorAt, connector.pollIntervalSeconds),
                 isDue:
                   connector.type === "webhook"

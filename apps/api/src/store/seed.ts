@@ -154,7 +154,8 @@ export function buildSeedState(config: AppConfig): SeedState {
       enabled: true,
       pollIntervalSeconds: 300,
       lastSuccessAt: null,
-      lastErrorAt: null
+      lastErrorAt: null,
+      lastErrorMessage: null
     },
     {
       id: "connector-zabbix-demo",
@@ -176,7 +177,8 @@ export function buildSeedState(config: AppConfig): SeedState {
       enabled: true,
       pollIntervalSeconds: 300,
       lastSuccessAt: null,
-      lastErrorAt: null
+      lastErrorAt: null,
+      lastErrorMessage: null
     },
     {
       id: "connector-prtg-demo",
@@ -198,7 +200,8 @@ export function buildSeedState(config: AppConfig): SeedState {
       enabled: true,
       pollIntervalSeconds: 300,
       lastSuccessAt: null,
-      lastErrorAt: null
+      lastErrorAt: null,
+      lastErrorMessage: null
     }
   ];
 

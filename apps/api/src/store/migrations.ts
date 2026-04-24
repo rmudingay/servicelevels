@@ -53,7 +53,8 @@ export const migrations: Migration[] = [
         enabled boolean NOT NULL DEFAULT true,
         poll_interval_seconds integer NOT NULL DEFAULT 300,
         last_success_at timestamptz NULL,
-        last_error_at timestamptz NULL
+        last_error_at timestamptz NULL,
+        last_error_message text NULL
       )`,
       `CREATE TABLE IF NOT EXISTS banners (
         id text PRIMARY KEY,
@@ -147,6 +148,12 @@ export const migrations: Migration[] = [
     statements: [
       `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS auth_settings_json jsonb`,
       `ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS notification_settings_json jsonb`
+    ]
+  },
+  {
+    id: "003_connector_error_message",
+    statements: [
+      `ALTER TABLE connectors ADD COLUMN IF NOT EXISTS last_error_message text`
     ]
   }
 ];

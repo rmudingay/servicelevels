@@ -688,7 +688,7 @@ function connectorTemplate(type: IntegrationConnector["type"]): Pick<Integration
     default:
       return {
         pollIntervalSeconds: 300,
-        configJson: JSON.stringify({ baseUrl: "https://zabbix.example.org/api_jsonrpc.php", mode: "api", tags: [], services: [] }, null, 2),
+        configJson: JSON.stringify({ baseUrl: "https://zabbix.example.org/api_jsonrpc.php", mode: "api", tags: [], services: [], tlsRejectUnauthorized: true }, null, 2),
         authJson: JSON.stringify({ username: "", password: "", token: "" }, null, 2)
       };
   }
@@ -719,7 +719,7 @@ function connectorHelp(type: IntegrationConnector["type"]): { nameHelp: string; 
   }
   return {
     nameHelp: "A display label for this Zabbix integration. Put the Zabbix API URL in Config JSON baseUrl.",
-    configHelp: "Use baseUrl, mode, hostIds, groupIds, tags, severities, and services[] mappings.",
+    configHelp: "Use baseUrl, mode, hostIds, groupIds, tags, severities, services[] mappings, and optional caCert/tlsRejectUnauthorized.",
     authHelp: "Use token or username/password."
   };
 }
@@ -770,6 +770,7 @@ export function AdminPage() {
         pollIntervalSeconds: number;
         lastSuccessAt: string | null;
         lastErrorAt: string | null;
+        lastErrorMessage: string | null;
         nextDueAt: string | null;
         isDue: boolean;
       }>;
@@ -1505,6 +1506,7 @@ export function AdminPage() {
                           {connector.enabled ? "enabled" : "disabled"} ·{" "}
                           {connector.lastSuccessAt ? `last success ${new Date(connector.lastSuccessAt).toLocaleString()}` : connector.lastErrorAt ? `last error ${new Date(connector.lastErrorAt).toLocaleString()}` : "not collected"}
                         </div>
+                        {connector.lastErrorMessage && <div className="cachet-row-meta connector-error-message">{connector.lastErrorMessage}</div>}
                       </div>
                     ))}
                   </div>

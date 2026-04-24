@@ -78,6 +78,7 @@ test("persistTenantCycle stores snapshots and updates connector success/error ti
 
   const updatedConnector = await store.getConnectors(tenant.id);
   assert.equal(updatedConnector[0]?.lastErrorAt, "2026-04-20T13:00:00.000Z");
+  assert.equal(updatedConnector[0]?.lastErrorMessage, "transient failure");
   assert.equal(updatedConnector[0]?.lastSuccessAt, null);
   assert.equal((await store.getLatestSnapshot(tenant.id))?.id, "snapshot-persist");
 });

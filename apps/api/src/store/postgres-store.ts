@@ -44,6 +44,20 @@ function parseJson<T>(value: unknown, fallback: T): T {
   return (value ?? fallback) as T;
 }
 
+function jsonText(value: unknown, fallback = "{}"): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return fallback;
+  }
+}
+
 function toBoolean(value: unknown): boolean {
   return value === true || value === "t" || value === 1 || value === "1";
 }
@@ -92,12 +106,13 @@ function mapConnector(row: RawRow): IntegrationConnector {
     tenantId: String(row.tenant_id),
     type: String(row.type) as IntegrationConnector["type"],
     name: String(row.name),
-    configJson: String(row.config_json ?? "{}"),
-    authJson: String(row.auth_json ?? "{}"),
+    configJson: jsonText(row.config_json),
+    authJson: jsonText(row.auth_json),
     enabled: toBoolean(row.enabled),
     pollIntervalSeconds: Number(row.poll_interval_seconds ?? 300),
     lastSuccessAt: row.last_success_at ? new Date(String(row.last_success_at)).toISOString() : null,
-    lastErrorAt: row.last_error_at ? new Date(String(row.last_error_at)).toISOString() : null
+    lastErrorAt: row.last_error_at ? new Date(String(row.last_error_at)).toISOString() : null,
+    lastErrorMessage: typeof row.last_error_message === "string" && row.last_error_message ? row.last_error_message : null
   };
 }
 
@@ -296,118 +311,127 @@ export class PostgresStore implements StatusRepository {
   }
 
   async getMeta(): Promise<AppMeta> {
-    this.ensureState();
+    const state = await this.freshState();
     return {
-      ...this.state!.meta,
-      publicAuthMode: this.state!.platformSettings.auth.publicAuthMode,
-      adminAuthModes: this.state!.platformSettings.auth.adminAuthModes
+      ...state.meta,
+      publicAuthMode: state.platformSettings.auth.publicAuthMode,
+      adminAuthModes: state.platformSettings.auth.adminAuthModes
     };
   }
 
   async getBranding(): Promise<Branding> {
-    this.ensureState();
-    return this.state!.branding;
+    const state = await this.freshState();
+    return state.branding;
   }
 
   async getPlatformSettings(): Promise<PlatformSettings> {
-    this.ensureState();
-    return clonePlatformSettings(this.state!.platformSettings);
+    const state = await this.freshState();
+    return clonePlatformSettings(state.platformSettings);
   }
 
   async getTenants(): Promise<Tenant[]> {
-    this.ensureState();
-    return [...this.state!.tenants];
+    const state = await this.freshState();
+    return [...state.tenants];
   }
 
   async getTabs(tenantId?: string): Promise<TabDefinition[]> {
-    this.ensureState();
-    return this.state!.tabs.filter((tab) => !tenantId || tab.tenantId === tenantId);
+    const state = await this.freshState();
+    return state.tabs.filter((tab) => !tenantId || tab.tenantId === tenantId);
   }
 
   async getServices(tenantId?: string): Promise<ServiceDefinition[]> {
-    this.ensureState();
-    return this.state!.services.filter((service) => !tenantId || service.tenantId === tenantId);
+    const state = await this.freshState();
+    return state.services.filter((service) => !tenantId || service.tenantId === tenantId);
   }
 
   async getConnectors(tenantId?: string): Promise<IntegrationConnector[]> {
-    this.ensureState();
-    return this.state!.connectors.filter((connector) => !tenantId || connector.tenantId === tenantId);
+    const state = await this.freshState();
+    return state.connectors.filter((connector) => !tenantId || connector.tenantId === tenantId);
   }
 
   async getBanners(tenantId?: string): Promise<Banner[]> {
-    this.ensureState();
-    return this.state!.banners.filter((banner) => !tenantId || banner.tenantId === tenantId);
+    const state = await this.freshState();
+    return state.banners.filter((banner) => !tenantId || banner.tenantId === tenantId);
   }
 
   async getIncidents(tenantId?: string): Promise<Incident[]> {
-    this.ensureState();
-    return this.state!.incidents.filter((incident) => !tenantId || incident.tenantId === tenantId);
+    const state = await this.freshState();
+    return state.incidents.filter((incident) => !tenantId || incident.tenantId === tenantId);
   }
 
   async getMaintenanceWindows(tenantId?: string): Promise<MaintenanceWindow[]> {
-    this.ensureState();
-    return this.state!.maintenance.filter((entry) => !tenantId || entry.tenantId === tenantId);
+    const state = await this.freshState();
+    return state.maintenance.filter((entry) => !tenantId || entry.tenantId === tenantId);
   }
 
   async getSubscriptions(tenantId?: string): Promise<NotificationSubscription[]> {
-    this.ensureState();
-    return this.state!.subscriptions.filter((entry) => !tenantId || entry.tenantId === tenantId);
+    const state = await this.freshState();
+    return state.subscriptions.filter((entry) => !tenantId || entry.tenantId === tenantId);
   }
 
   async getColors(tenantId?: string): Promise<ColorMapping[]> {
-    this.ensureState();
-    return this.state!.colors.filter((color) => !tenantId || color.tenantId === tenantId);
+    const state = await this.freshState();
+    return state.colors.filter((color) => !tenantId || color.tenantId === tenantId);
   }
 
   async getLatestSnapshot(tenantId?: string): Promise<Snapshot | null> {
-    this.ensureState();
-    const snapshots = this.state!.snapshots.filter((snapshot) => !tenantId || snapshot.tenantId === tenantId);
+    const state = await this.freshState();
+    const snapshots = state.snapshots.filter((snapshot) => !tenantId || snapshot.tenantId === tenantId);
     return snapshots.at(-1) ?? null;
   }
 
   async getDailySummaries(tenantId?: string): Promise<StatusDailySummary[]> {
-    this.ensureState();
-    return this.state!.dailySummaries
+    const state = await this.freshState();
+    return state.dailySummaries
       .filter((entry) => !tenantId || entry.tenantId === tenantId)
       .map((entry) => ({ ...entry, secondsByStatus: cloneSecondsByStatus(entry.secondsByStatus) }))
       .sort((left, right) => right.day.localeCompare(left.day));
   }
 
   async getStatusView(tenantSlug?: string): Promise<StatusView> {
-    this.ensureState();
+    const state = await this.freshState();
     const tenant = tenantSlug
-      ? this.state!.tenants.find((entry) => entry.slug === tenantSlug) ?? this.state!.tenants[0]
-      : this.state!.tenants[0];
+      ? state.tenants.find((entry) => entry.slug === tenantSlug) ?? state.tenants[0]
+      : state.tenants[0];
 
     return {
-      meta: await this.getMeta(),
-      tenants: [...this.state!.tenants],
-      tabs: await this.getTabs(tenant?.id),
-      services: await this.getServices(tenant?.id),
-      connectors: await this.getConnectors(tenant?.id),
-      banners: await this.getBanners(tenant?.id),
-      incidents: await this.getIncidents(tenant?.id),
-      maintenance: await this.getMaintenanceWindows(tenant?.id),
-      subscriptions: await this.getSubscriptions(tenant?.id),
-      colors: await this.getColors(tenant?.id),
-      snapshot: tenant ? await this.getLatestSnapshot(tenant.id) : null,
-      dailySummaries: tenant ? await this.getDailySummaries(tenant.id) : []
+      meta: {
+        ...state.meta,
+        publicAuthMode: state.platformSettings.auth.publicAuthMode,
+        adminAuthModes: state.platformSettings.auth.adminAuthModes
+      },
+      tenants: [...state.tenants],
+      tabs: state.tabs.filter((tab) => !tenant || tab.tenantId === tenant.id),
+      services: state.services.filter((service) => !tenant || service.tenantId === tenant.id),
+      connectors: state.connectors.filter((connector) => !tenant || connector.tenantId === tenant.id),
+      banners: state.banners.filter((banner) => !tenant || banner.tenantId === tenant.id),
+      incidents: state.incidents.filter((incident) => !tenant || incident.tenantId === tenant.id),
+      maintenance: state.maintenance.filter((entry) => !tenant || entry.tenantId === tenant.id),
+      subscriptions: state.subscriptions.filter((entry) => !tenant || entry.tenantId === tenant.id),
+      colors: state.colors.filter((color) => !tenant || color.tenantId === tenant.id),
+      snapshot: tenant ? state.snapshots.filter((snapshot) => snapshot.tenantId === tenant.id).at(-1) ?? null : null,
+      dailySummaries: tenant
+        ? state.dailySummaries
+            .filter((entry) => entry.tenantId === tenant.id)
+            .map((entry) => ({ ...entry, secondsByStatus: cloneSecondsByStatus(entry.secondsByStatus) }))
+            .sort((left, right) => right.day.localeCompare(left.day))
+        : []
     };
   }
 
   async listUsers(): Promise<AdminUser[]> {
-    this.ensureState();
-    return [...this.state!.users];
+    const state = await this.freshState();
+    return [...state.users];
   }
 
   async findUserByUsername(username: string): Promise<AdminUser | undefined> {
-    this.ensureState();
-    return this.state!.users.find((user) => user.username === username);
+    const state = await this.freshState();
+    return state.users.find((user) => user.username === username);
   }
 
   async findUserById(id: string): Promise<AdminUser | undefined> {
-    this.ensureState();
-    return this.state!.users.find((user) => user.id === id);
+    const state = await this.freshState();
+    return state.users.find((user) => user.id === id);
   }
 
   async verifyLocalCredentials(username: string, password: string): Promise<AdminUser | null> {
@@ -644,17 +668,18 @@ export class PostgresStore implements StatusRepository {
 
   async createConnector(
     tenantId: string,
-    input: Omit<IntegrationConnector, "id" | "tenantId" | "lastSuccessAt" | "lastErrorAt">
+    input: Omit<IntegrationConnector, "id" | "tenantId" | "lastSuccessAt" | "lastErrorAt" | "lastErrorMessage">
   ): Promise<IntegrationConnector> {
     const connector: IntegrationConnector = {
       ...input,
       id: `connector-${slugify(input.name)}-${Date.now()}`,
       tenantId,
       lastSuccessAt: null,
-      lastErrorAt: null
+      lastErrorAt: null,
+      lastErrorMessage: null
     };
     await this.pool.query(
-      "INSERT INTO connectors (id, tenant_id, type, name, config_json, auth_json, enabled, poll_interval_seconds, last_success_at, last_error_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10)",
+      "INSERT INTO connectors (id, tenant_id, type, name, config_json, auth_json, enabled, poll_interval_seconds, last_success_at, last_error_at, last_error_message) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10,$11)",
       [
         connector.id,
         tenantId,
@@ -665,7 +690,8 @@ export class PostgresStore implements StatusRepository {
         connector.enabled,
         connector.pollIntervalSeconds,
         connector.lastSuccessAt,
-        connector.lastErrorAt
+        connector.lastErrorAt,
+        connector.lastErrorMessage
       ]
     );
     await this.loadState();
@@ -680,8 +706,19 @@ export class PostgresStore implements StatusRepository {
     }
     const next = { ...current, ...patch };
     await this.pool.query(
-      "UPDATE connectors SET type = $1, name = $2, config_json = $3::jsonb, auth_json = $4::jsonb, enabled = $5, poll_interval_seconds = $6, last_success_at = $7, last_error_at = $8 WHERE id = $9",
-      [next.type, next.name, next.configJson, next.authJson, next.enabled, next.pollIntervalSeconds, next.lastSuccessAt, next.lastErrorAt, connectorId]
+      "UPDATE connectors SET type = $1, name = $2, config_json = $3::jsonb, auth_json = $4::jsonb, enabled = $5, poll_interval_seconds = $6, last_success_at = $7, last_error_at = $8, last_error_message = $9 WHERE id = $10",
+      [
+        next.type,
+        next.name,
+        jsonText(next.configJson),
+        jsonText(next.authJson),
+        next.enabled,
+        next.pollIntervalSeconds,
+        next.lastSuccessAt,
+        next.lastErrorAt,
+        next.lastErrorMessage,
+        connectorId
+      ]
     );
     await this.loadState();
     return next;
@@ -890,6 +927,12 @@ export class PostgresStore implements StatusRepository {
     if (!this.state) {
       throw new Error("PostgresStore has not been initialized");
     }
+  }
+
+  private async freshState(): Promise<SeedState> {
+    this.ensureState();
+    await this.loadState();
+    return this.state!;
   }
 
   private async normalizeLegacySnapshotData(): Promise<void> {

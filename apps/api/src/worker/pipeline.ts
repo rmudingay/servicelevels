@@ -143,14 +143,17 @@ export async function persistTenantCycle(config: AppConfig, repo: StatusReposito
   for (const run of cycle.connectorRuns) {
     if (run.status === "error") {
       await repo.updateConnector(run.connector.id, {
-        lastErrorAt: run.touchedAt
+        lastErrorAt: run.touchedAt,
+        lastErrorMessage: run.errorMessage ?? "Connector collection failed"
       });
       continue;
     }
 
     if (!erroredConnectorIds.has(run.connector.id)) {
       await repo.updateConnector(run.connector.id, {
-        lastSuccessAt: run.touchedAt
+        lastSuccessAt: run.touchedAt,
+        lastErrorAt: null,
+        lastErrorMessage: null
       });
     }
   }
@@ -262,7 +265,7 @@ export async function ingestWebhookEvent(
 
   await repo.saveSnapshot(snapshot);
   await processStatusEvents(await resolveEffectiveConfig(config, repo), repo, tenant, previousSnapshot, snapshot);
-  await repo.updateConnector(connector.id, { lastSuccessAt: collectedAt });
+  await repo.updateConnector(connector.id, { lastSuccessAt: collectedAt, lastErrorAt: null, lastErrorMessage: null });
 
   return {
     tenant,

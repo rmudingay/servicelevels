@@ -88,6 +88,7 @@ export const api = {
           pollIntervalSeconds: number;
           lastSuccessAt: string | null;
           lastErrorAt: string | null;
+          lastErrorMessage: string | null;
           nextDueAt: string | null;
           isDue: boolean;
         }>;

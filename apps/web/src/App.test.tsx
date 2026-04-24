@@ -222,7 +222,8 @@ function buildStatusView(): StatusView {
         enabled: true,
         pollIntervalSeconds: 300,
         lastSuccessAt: "2026-04-20T09:55:00.000Z",
-        lastErrorAt: null
+        lastErrorAt: null,
+        lastErrorMessage: null
       }
     ],
     banners: [
@@ -373,6 +374,7 @@ function primeAuthenticatedAdminMocks(view = buildStatusView()): void {
             pollIntervalSeconds: 300,
             lastSuccessAt: "2026-04-20T10:00:00.000Z",
             lastErrorAt: null,
+            lastErrorMessage: null,
             nextDueAt: "2026-04-20T10:05:00.000Z",
             isDue: true
           }

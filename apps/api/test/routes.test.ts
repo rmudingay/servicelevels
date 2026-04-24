@@ -488,6 +488,25 @@ test("admin CRUD routes manage connectors, tabs, banners, subscriptions, brandin
     assert.equal(connectorCreate.statusCode, 201);
     const connector = connectorCreate.json() as { id: string };
 
+    const invalidConnectorCreate = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/connectors",
+      headers: {
+        cookie: cookieHeader
+      },
+      payload: {
+        tenantSlug: "primary-site",
+        type: "zabbix",
+        name: "Bad Zabbix",
+        configJson: "{\"tags\":[\"Type\":\"Edge\"]}",
+        authJson: "{}",
+        enabled: true,
+        pollIntervalSeconds: 300
+      }
+    });
+    assert.equal(invalidConnectorCreate.statusCode, 400);
+    assert.match(invalidConnectorCreate.body, /Config JSON must contain valid JSON/);
+
     const connectorPatch = await app.inject({
       method: "PATCH",
       url: `/api/v1/admin/connectors/${connector.id}`,

@@ -52,7 +52,7 @@ export interface StatusRepository {
   deleteTenant(tenantId: string): Promise<boolean>;
   createSubscription(tenantId: string, input: Omit<NotificationSubscription, "id" | "tenantId">): Promise<NotificationSubscription>;
   deleteSubscription(subscriptionId: string): Promise<boolean>;
-  createConnector(tenantId: string, input: Omit<IntegrationConnector, "id" | "tenantId" | "lastSuccessAt" | "lastErrorAt">): Promise<IntegrationConnector>;
+  createConnector(tenantId: string, input: Omit<IntegrationConnector, "id" | "tenantId" | "lastSuccessAt" | "lastErrorAt" | "lastErrorMessage">): Promise<IntegrationConnector>;
   updateConnector(connectorId: string, patch: Partial<IntegrationConnector>): Promise<IntegrationConnector | null>;
   deleteConnector(connectorId: string): Promise<boolean>;
   createBanner(tenantId: string, input: Omit<Banner, "id" | "tenantId">): Promise<Banner>;

@@ -47,6 +47,8 @@ type ZabbixConfig = {
   severities?: number[];
   evaltype?: number;
   services?: ZabbixMapping[];
+  tlsRejectUnauthorized?: boolean;
+  caCert?: string;
 };
 
 type ZabbixAuth = {
@@ -101,23 +103,38 @@ function buildTagFilters(tags: Array<{ tag: string; value?: string; operator?: s
   }));
 }
 
-async function zabbixRpc(baseUrl: string, method: string, params: JsonObject, auth?: string, timeoutMs = 15_000): Promise<JsonObject> {
+function zabbixTlsOptions(config: ZabbixConfig) {
+  return config.tlsRejectUnauthorized === undefined && !config.caCert
+    ? undefined
+    : {
+        rejectUnauthorized: config.tlsRejectUnauthorized,
+        ca: config.caCert
+      };
+}
+
+async function zabbixRpcWithConfig(config: ZabbixConfig, method: string, params: JsonObject, auth?: string): Promise<JsonObject> {
+  const baseUrl = resolveBaseUrl(config);
+  if (!baseUrl) {
+    throw new Error("Zabbix baseUrl is missing");
+  }
   const body: JsonObject = {
     jsonrpc: "2.0",
     id: 1,
     method,
     params
   };
+  const headers: Record<string, string> = {
+    "content-type": "application/json"
+  };
   if (auth) {
-    body.auth = auth;
+    headers.authorization = `Bearer ${auth}`;
   }
 
   const response = await requestJson(buildUrl(baseUrl, "/api_jsonrpc.php"), {
     method: "POST",
-    timeoutMs,
-    headers: {
-      "content-type": "application/json"
-    },
+    timeoutMs: config.timeoutMs ?? 15_000,
+    tls: zabbixTlsOptions(config),
+    headers,
     body
   });
 
@@ -134,7 +151,7 @@ async function zabbixRpc(baseUrl: string, method: string, params: JsonObject, au
   return response;
 }
 
-async function authenticate(baseUrl: string, auth: ZabbixAuth, timeoutMs: number): Promise<string | undefined> {
+async function authenticate(config: ZabbixConfig, auth: ZabbixAuth): Promise<string | undefined> {
   if (auth.token) {
     return auth.token;
   }
@@ -144,16 +161,16 @@ async function authenticate(baseUrl: string, auth: ZabbixAuth, timeoutMs: number
   if (!auth.username || !auth.password) {
     return undefined;
   }
-  const response = await zabbixRpc(baseUrl, "user.login", {
+  const response = await zabbixRpcWithConfig(config, "user.login", {
     username: auth.username,
     password: auth.password
-  }, undefined, timeoutMs);
+  });
   return getString(response.result);
 }
 
-async function logout(baseUrl: string, token: string, timeoutMs: number): Promise<void> {
+async function logout(config: ZabbixConfig, token: string): Promise<void> {
   try {
-    await zabbixRpc(baseUrl, "user.logout", {}, token, timeoutMs);
+    await zabbixRpcWithConfig(config, "user.logout", {}, token);
   } catch {
     // Best-effort cleanup.
   }
@@ -227,8 +244,8 @@ async function collectZabbixService(
     commonParams.evaltype = mapping.evaltype;
   }
 
-  const activeResponse = await zabbixRpc(baseUrl, "problem.get", commonParams, authToken, config.timeoutMs ?? 15_000);
-  const suppressedResponse = await zabbixRpc(baseUrl, "problem.get", { ...commonParams, suppressed: true }, authToken, config.timeoutMs ?? 15_000);
+  const activeResponse = await zabbixRpcWithConfig(config, "problem.get", commonParams, authToken);
+  const suppressedResponse = await zabbixRpcWithConfig(config, "problem.get", { ...commonParams, suppressed: true }, authToken);
   const activeProblems = Array.isArray(activeResponse.result) ? activeResponse.result.filter(isRecord) : [];
   const suppressedProblems = Array.isArray(suppressedResponse.result) ? suppressedResponse.result.filter(isRecord) : [];
   const fallback = mapping.healthySummary ?? config.summary ?? statusSummary(config.defaultStatus ?? "healthy");
@@ -259,7 +276,7 @@ export async function collectZabbixConnector(context: ConnectorCollectionContext
 
   let token: string | undefined;
   try {
-    token = await authenticate(resolveBaseUrl(config)!, auth, config.timeoutMs ?? 15_000);
+    token = await authenticate(config, auth);
     if (!token) {
       return {
         results: [],
@@ -307,7 +324,7 @@ export async function collectZabbixConnector(context: ConnectorCollectionContext
     };
   } finally {
     if (token && auth.username && auth.password) {
-      await logout(resolveBaseUrl(config)!, token, config.timeoutMs ?? 15_000);
+      await logout(config, token);
     }
   }
 }

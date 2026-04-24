@@ -27,7 +27,8 @@ function buildConnector(type: IntegrationConnector["type"], configJson: string, 
     enabled: true,
     pollIntervalSeconds: 300,
     lastSuccessAt: null,
-    lastErrorAt: null
+    lastErrorAt: null,
+    lastErrorMessage: null
   };
 }
 
@@ -96,8 +97,11 @@ test("Prometheus connector normalizes threshold-based query results", async () =
 test("Zabbix connector normalizes active problems into down status", async () => {
   const originalFetch = globalThis.fetch;
   let call = 0;
-  globalThis.fetch = async () => {
+  const authorizationHeaders: Array<string | undefined> = [];
+  globalThis.fetch = async (_url, init) => {
     call += 1;
+    const headers = new Headers(init?.headers);
+    authorizationHeaders.push(headers.get("authorization") ?? undefined);
     if (call === 1) {
       return jsonResponse({
         jsonrpc: "2.0",
@@ -136,6 +140,7 @@ test("Zabbix connector normalizes active problems into down status", async () =>
     const outcome = await collectZabbixConnector(buildContext(connector, service));
     assert.equal(outcome.run.status, "success");
     assert.equal(outcome.results[0]?.status, "down");
+    assert.deepEqual(authorizationHeaders, ["Bearer static-token", "Bearer static-token"]);
   } finally {
     globalThis.fetch = originalFetch;
   }

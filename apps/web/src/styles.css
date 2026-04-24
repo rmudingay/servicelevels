@@ -600,6 +600,11 @@ textarea:focus {
   font-size: 12px;
 }
 
+.connector-error-message {
+  color: var(--red);
+  margin-top: 4px;
+}
+
 .cachet-row-actions {
   display: inline-flex;
   align-items: center;

@@ -7,10 +7,19 @@ import type {
   TabDefinition,
   Tenant
 } from "@service-levels/shared";
+import { Agent } from "undici";
 import { statusSummary } from "../store/utils.js";
 import { nowIso } from "../utils.js";
 
 export type JsonObject = Record<string, unknown>;
+export type RequestTlsOptions = {
+  rejectUnauthorized?: boolean;
+  ca?: string;
+};
+
+type FetchInit = Omit<RequestInit, "dispatcher"> & {
+  dispatcher?: unknown;
+};
 
 export type ServiceResult = Snapshot["services"][number] & {
   sourceConnectorId: string | null;
@@ -124,6 +133,35 @@ export function buildUrl(baseUrl: string, path: string, query: Record<string, st
   return url.toString();
 }
 
+function buildDispatcher(tls?: RequestTlsOptions): Agent | undefined {
+  if (!tls || (tls.rejectUnauthorized === undefined && !tls.ca)) {
+    return undefined;
+  }
+  return new Agent({
+    connect: {
+      rejectUnauthorized: tls.rejectUnauthorized,
+      ca: tls.ca
+    }
+  });
+}
+
+function describeRequestFailure(url: string, error: unknown): Error {
+  if (!(error instanceof Error)) {
+    return new Error(`Request to ${url} failed`);
+  }
+  const cause = error.cause;
+  const causeMessage =
+    cause && typeof cause === "object" && "message" in cause && typeof cause.message === "string"
+      ? cause.message
+      : undefined;
+  const causeCode =
+    cause && typeof cause === "object" && "code" in cause && typeof cause.code === "string"
+      ? cause.code
+      : undefined;
+  const detail = causeMessage ? `${causeCode ? `${causeCode}: ` : ""}${causeMessage}` : error.message;
+  return new Error(`Request to ${url} failed: ${detail}`);
+}
+
 export async function requestJson(
   url: string,
   options: {
@@ -131,17 +169,28 @@ export async function requestJson(
     headers?: Record<string, string>;
     body?: unknown;
     timeoutMs?: number;
+    tls?: RequestTlsOptions;
   } = {}
 ): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 15_000);
+  const dispatcher = buildDispatcher(options.tls);
   try {
-    const response = await fetch(url, {
+    const requestInit: FetchInit = {
       method: options.method ?? "GET",
       headers: options.headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: controller.signal
-    });
+    };
+    if (dispatcher) {
+      requestInit.dispatcher = dispatcher;
+    }
+    let response: Response;
+    try {
+      response = await fetch(url, requestInit as unknown as RequestInit);
+    } catch (error) {
+      throw describeRequestFailure(url, error);
+    }
     const text = await response.text();
     if (!response.ok) {
       throw new Error(`Request to ${url} failed with ${response.status}: ${text.slice(0, 240)}`);
@@ -149,6 +198,7 @@ export async function requestJson(
     return text ? (JSON.parse(text) as unknown) : {};
   } finally {
     clearTimeout(timeout);
+    await dispatcher?.close();
   }
 }
 
@@ -159,17 +209,28 @@ export async function requestText(
     headers?: Record<string, string>;
     body?: unknown;
     timeoutMs?: number;
+    tls?: RequestTlsOptions;
   } = {}
 ): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 15_000);
+  const dispatcher = buildDispatcher(options.tls);
   try {
-    const response = await fetch(url, {
+    const requestInit: FetchInit = {
       method: options.method ?? "GET",
       headers: options.headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: controller.signal
-    });
+    };
+    if (dispatcher) {
+      requestInit.dispatcher = dispatcher;
+    }
+    let response: Response;
+    try {
+      response = await fetch(url, requestInit as unknown as RequestInit);
+    } catch (error) {
+      throw describeRequestFailure(url, error);
+    }
     const text = await response.text();
     if (!response.ok) {
       throw new Error(`Request to ${url} failed with ${response.status}: ${text.slice(0, 240)}`);
@@ -177,6 +238,7 @@ export async function requestText(
     return text;
   } finally {
     clearTimeout(timeout);
+    await dispatcher?.close();
   }
 }
 

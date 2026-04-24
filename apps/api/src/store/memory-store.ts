@@ -614,14 +614,15 @@ export class MemoryStore {
 
   async createConnector(
     tenantId: string,
-    input: Omit<IntegrationConnector, "id" | "tenantId" | "lastSuccessAt" | "lastErrorAt">
+    input: Omit<IntegrationConnector, "id" | "tenantId" | "lastSuccessAt" | "lastErrorAt" | "lastErrorMessage">
   ): Promise<IntegrationConnector> {
     const connector: IntegrationConnector = {
       ...input,
       id: `connector-${slugify(input.name)}-${Date.now()}`,
       tenantId,
       lastSuccessAt: null,
-      lastErrorAt: null
+      lastErrorAt: null,
+      lastErrorMessage: null
     };
     this.state.connectors = [...this.state.connectors, connector];
     return connector;
