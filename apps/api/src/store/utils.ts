@@ -1,4 +1,4 @@
-import type { Snapshot, StatusLevel } from "@service-levels/shared";
+import type { ServiceDefinition, ServiceStatusEvent, Snapshot, StatusLevel } from "@service-levels/shared";
 
 export function statusSummary(status: StatusLevel): string {
   switch (status) {
@@ -68,6 +68,24 @@ export function snapshotHash(snapshot: Snapshot): string {
       summary: entry.summary,
       lastCheckedAt: entry.lastCheckedAt
     }))
+  });
+}
+
+export function serviceStatusEventsFromSnapshot(snapshot: Snapshot, services: ServiceDefinition[]): ServiceStatusEvent[] {
+  const servicesById = new Map(services.map((service) => [service.id, service]));
+  return snapshot.services.map((entry) => {
+    const service = servicesById.get(entry.serviceId);
+    return {
+      id: `event-${snapshot.id}-${entry.serviceId}`,
+      tenantId: snapshot.tenantId,
+      serviceId: entry.serviceId,
+      snapshotId: snapshot.id,
+      collectedAt: entry.lastCheckedAt || snapshot.collectedAt,
+      status: entry.status,
+      summary: entry.summary,
+      sourceType: service?.sourceType ?? "webhook",
+      sourceRef: service?.sourceRef ?? ""
+    };
   });
 }
 

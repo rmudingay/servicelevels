@@ -13,6 +13,7 @@ import type {
   NotificationSubscription,
   PlatformSettings,
   ServiceDailySummary,
+  ServiceStatusEvent,
   Snapshot,
   StatusDailySummary,
   StatusLevel,
@@ -25,7 +26,7 @@ import { clonePlatformSettings, normalizePlatformSettings, platformSettingsFromC
 import { nowIso, slugify } from "../utils.js";
 import { buildSeedState, type SeedState } from "./seed.js";
 import { runMigrations } from "./migrations.js";
-import { mergeSummaryStatus, severityTrend, splitUtcIntervalByDay, utcDayKey, worstStatus } from "./utils.js";
+import { mergeSummaryStatus, serviceStatusEventsFromSnapshot, severityTrend, splitUtcIntervalByDay, utcDayKey, worstStatus } from "./utils.js";
 import type { StatusRepository } from "./types.js";
 
 type RawRow = Record<string, unknown>;
@@ -202,6 +203,20 @@ function mapSnapshot(row: RawRow): Snapshot {
     overallStatus: String(row.overall_status) as StatusLevel,
     services: parseJson<Snapshot["services"]>(row.services, []),
     rawPayload: parseJson(row.raw_payload, {})
+  };
+}
+
+function mapServiceStatusEvent(row: RawRow): ServiceStatusEvent {
+  return {
+    id: String(row.id),
+    tenantId: String(row.tenant_id),
+    serviceId: String(row.service_id),
+    snapshotId: String(row.snapshot_id),
+    collectedAt: new Date(String(row.collected_at)).toISOString(),
+    status: String(row.status) as ServiceStatusEvent["status"],
+    summary: String(row.summary ?? ""),
+    sourceType: String(row.source_type) as ServiceStatusEvent["sourceType"],
+    sourceRef: String(row.source_ref ?? "")
   };
 }
 
@@ -473,6 +488,13 @@ export class PostgresStore implements StatusRepository {
     return snapshots.at(-1) ?? null;
   }
 
+  async getServiceStatusEvents(tenantId?: string): Promise<ServiceStatusEvent[]> {
+    const state = await this.freshState();
+    return state.serviceEvents
+      .filter((event) => !tenantId || event.tenantId === tenantId)
+      .sort((left, right) => left.collectedAt.localeCompare(right.collectedAt));
+  }
+
   async getDailySummaries(tenantId?: string): Promise<StatusDailySummary[]> {
     const state = await this.freshState();
     return state.dailySummaries
@@ -503,6 +525,9 @@ export class PostgresStore implements StatusRepository {
       subscriptions: state.subscriptions.filter((entry) => !tenant || entry.tenantId === tenant.id),
       colors: state.colors.filter((color) => !tenant || color.tenantId === tenant.id),
       snapshot: tenant ? state.snapshots.filter((snapshot) => snapshot.tenantId === tenant.id).at(-1) ?? null : null,
+      serviceEvents: tenant
+        ? state.serviceEvents.filter((event) => event.tenantId === tenant.id).sort((left, right) => left.collectedAt.localeCompare(right.collectedAt))
+        : [],
       dailySummaries: tenant
         ? state.dailySummaries
             .filter((entry) => entry.tenantId === tenant.id)
@@ -1080,6 +1105,8 @@ export class PostgresStore implements StatusRepository {
   async saveSnapshot(snapshot: Snapshot): Promise<Snapshot> {
     const previousSnapshot = await this.getLatestSnapshot(snapshot.tenantId);
     const existingSummaries = await this.getDailySummaries(snapshot.tenantId);
+    const serviceEvents = serviceStatusEventsFromSnapshot(snapshot, await this.getServices(snapshot.tenantId));
+    const eventCutoff = new Date(Date.parse(snapshot.collectedAt) - 32 * 24 * 60 * 60 * 1000).toISOString();
     const updatedSummaries = buildUpdatedDailySummaries(previousSnapshot, snapshot, existingSummaries);
 
     const client = await this.pool.connect();
@@ -1089,6 +1116,23 @@ export class PostgresStore implements StatusRepository {
         "INSERT INTO snapshots (id, tenant_id, collected_at, overall_status, services, raw_payload) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb) ON CONFLICT (tenant_id) DO UPDATE SET id = EXCLUDED.id, collected_at = EXCLUDED.collected_at, overall_status = EXCLUDED.overall_status, services = EXCLUDED.services, raw_payload = EXCLUDED.raw_payload",
         [snapshot.id, snapshot.tenantId, snapshot.collectedAt, snapshot.overallStatus, JSON.stringify(snapshot.services), JSON.stringify(snapshot.rawPayload)]
       );
+      await client.query("DELETE FROM service_status_events WHERE tenant_id = $1 AND collected_at < $2", [snapshot.tenantId, eventCutoff]);
+      for (const event of serviceEvents) {
+        await client.query(
+          "INSERT INTO service_status_events (id, tenant_id, service_id, snapshot_id, collected_at, status, summary, source_type, source_ref) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO UPDATE SET collected_at = EXCLUDED.collected_at, status = EXCLUDED.status, summary = EXCLUDED.summary, source_type = EXCLUDED.source_type, source_ref = EXCLUDED.source_ref",
+          [
+            event.id,
+            event.tenantId,
+            event.serviceId,
+            event.snapshotId,
+            event.collectedAt,
+            event.status,
+            event.summary,
+            event.sourceType,
+            event.sourceRef
+          ]
+        );
+      }
       await client.query("DELETE FROM daily_status_summaries WHERE tenant_id = $1", [snapshot.tenantId]);
       for (const summary of updatedSummaries) {
         await client.query(
@@ -1117,6 +1161,10 @@ export class PostgresStore implements StatusRepository {
     this.state = {
       ...currentState,
       snapshots: [...currentState.snapshots.filter((entry) => entry.tenantId !== snapshot.tenantId), snapshot],
+      serviceEvents: [
+        ...currentState.serviceEvents.filter((event) => event.tenantId !== snapshot.tenantId || (event.collectedAt >= eventCutoff && event.snapshotId !== snapshot.id)),
+        ...serviceEvents
+      ],
       dailySummaries: [...currentState.dailySummaries.filter((entry) => entry.tenantId !== snapshot.tenantId), ...updatedSummaries]
     };
     return snapshot;
@@ -1361,6 +1409,16 @@ export class PostgresStore implements StatusRepository {
           "INSERT INTO snapshots (id, tenant_id, collected_at, overall_status, services, raw_payload) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb) ON CONFLICT (tenant_id) DO UPDATE SET id = EXCLUDED.id, collected_at = EXCLUDED.collected_at, overall_status = EXCLUDED.overall_status, services = EXCLUDED.services, raw_payload = EXCLUDED.raw_payload",
           [snapshot.id, snapshot.tenantId, snapshot.collectedAt, snapshot.overallStatus, JSON.stringify(snapshot.services), JSON.stringify(snapshot.rawPayload)]
         );
+      }
+
+      for (const event of seed.serviceEvents) {
+        await client.query(
+          "INSERT INTO service_status_events (id, tenant_id, service_id, snapshot_id, collected_at, status, summary, source_type, source_ref) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING",
+          [event.id, event.tenantId, event.serviceId, event.snapshotId, event.collectedAt, event.status, event.summary, event.sourceType, event.sourceRef]
+        );
+      }
+
+      for (const snapshot of seed.snapshots) {
         const day = utcDayKey(snapshot.collectedAt);
         const summary = seed.dailySummaries.find((entry) => entry.tenantId === snapshot.tenantId && entry.day === day);
         await client.query(
@@ -1395,7 +1453,7 @@ export class PostgresStore implements StatusRepository {
   }
 
   private async loadState(): Promise<void> {
-    const [settings, tenants, tabs, services, banners, incidents, maintenance, subscriptions, colors, snapshots, dailySummaries, users] = await Promise.all([
+    const [settings, tenants, tabs, services, banners, incidents, maintenance, subscriptions, colors, snapshots, serviceEvents, dailySummaries, users] = await Promise.all([
       this.pool.query("SELECT * FROM app_settings WHERE id = 1"),
       this.pool.query("SELECT * FROM tenants ORDER BY name"),
       this.pool.query("SELECT * FROM tabs ORDER BY sort_order, title"),
@@ -1406,6 +1464,7 @@ export class PostgresStore implements StatusRepository {
       this.pool.query("SELECT * FROM subscriptions ORDER BY channel_type, target"),
       this.pool.query("SELECT * FROM colors ORDER BY status_key"),
       this.pool.query("SELECT * FROM snapshots ORDER BY collected_at"),
+      this.pool.query("SELECT * FROM service_status_events ORDER BY collected_at"),
       this.pool.query("SELECT * FROM daily_status_summaries ORDER BY day DESC"),
       this.pool.query("SELECT * FROM users ORDER BY username")
     ]);
@@ -1451,6 +1510,7 @@ export class PostgresStore implements StatusRepository {
       subscriptions: subscriptions.rows.map(mapSubscription),
       colors: colors.rows.map(mapColor),
       snapshots: snapshots.rows.map(mapSnapshot),
+      serviceEvents: serviceEvents.rows.map(mapServiceStatusEvent),
       dailySummaries: dailySummaries.rows.map(mapDailySummary),
       users: users.rows.map(mapUser),
       platformSettings

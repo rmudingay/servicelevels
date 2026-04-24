@@ -55,8 +55,10 @@ test("status API exposes the current snapshot and daily summaries", async () => 
 
     assert.equal(response.statusCode, 200);
 
-    const body = response.json() as { snapshot?: { id: string }; dailySummaries?: Array<{ day: string }> };
+    const body = response.json() as { snapshot?: { id: string }; serviceEvents?: Array<{ serviceId: string }>; dailySummaries?: Array<{ day: string }> };
     assert.equal(Boolean(body.snapshot), true);
+    assert.equal(Array.isArray(body.serviceEvents), true);
+    assert.equal((body.serviceEvents?.length ?? 0) > 0, true);
     assert.equal(Array.isArray(body.dailySummaries), true);
     assert.equal(body.dailySummaries?.length > 0, true);
   } finally {

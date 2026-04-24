@@ -14,6 +14,7 @@ import type {
   NotificationSubscription,
   PlatformSettings,
   ServiceDefinition,
+  ServiceStatusEvent,
   StatusLevel,
   StatusView,
   TabDefinition,
@@ -106,23 +107,15 @@ export function colorFor(status: StatusLevel, colors: ColorMapping[]): string {
 
 type StatusBarEntry = {
   key: string;
-  day: string;
+  collectedAt: string;
   status: StatusLevel;
   summary: string;
-  firstCollectedAt: string;
-  lastCollectedAt: string;
-  sampleCount: number;
+  sourceType: ServiceDefinition["sourceType"] | "snapshot";
+  sourceRef: string;
 };
 
-const serviceHistoryLimit = 90;
-
-function formatDay(day: string): string {
-  return new Date(`${day}T12:00:00`).toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short",
-    year: "numeric"
-  });
-}
+const recentEventLimit = 6;
+const hourlyEventLimit = 24;
 
 function formatDateTime(value?: string | null): string {
   if (!value) {
@@ -162,67 +155,81 @@ function bannerTrendSymbol(trend: Banner["severityTrend"]): string {
   }
 }
 
-function summarizeSeconds(secondsByStatus: Record<StatusLevel, number>): string {
-  return statusChoices
-    .map((statusKey) => {
-      const seconds = Math.round(secondsByStatus[statusKey] ?? 0);
-      if (seconds <= 0) {
-        return "";
-      }
-      const minutes = Math.round(seconds / 60);
-      return minutes > 0 ? `${statusLabel(statusKey)} ${minutes}m` : `${statusLabel(statusKey)} ${seconds}s`;
-    })
-    .filter(Boolean)
-    .join(" · ");
+function eventHourKey(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value.slice(0, 13);
+  }
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}T${String(date.getUTCHours()).padStart(2, "0")}`;
+}
+
+function decimateServiceEvents(events: ServiceStatusEvent[]): ServiceStatusEvent[] {
+  const sorted = [...events].sort((left, right) => left.collectedAt.localeCompare(right.collectedAt));
+  const newest = sorted.at(-1);
+  if (!newest) {
+    return [];
+  }
+
+  const newestTime = Date.parse(newest.collectedAt);
+  if (!Number.isFinite(newestTime)) {
+    return sorted.slice(-(recentEventLimit + hourlyEventLimit));
+  }
+
+  const recentCutoff = newestTime - 60 * 60 * 1000;
+  const recent = sorted.filter((event) => Date.parse(event.collectedAt) >= recentCutoff).slice(-recentEventLimit);
+  const recentIds = new Set(recent.map((event) => event.id));
+  const hourly = new Map<string, ServiceStatusEvent>();
+
+  for (const event of sorted) {
+    if (recentIds.has(event.id)) {
+      continue;
+    }
+    const eventTime = Date.parse(event.collectedAt);
+    if (!Number.isFinite(eventTime) || eventTime >= recentCutoff) {
+      continue;
+    }
+    hourly.set(eventHourKey(event.collectedAt), event);
+  }
+
+  const older = Array.from(hourly.values())
+    .sort((left, right) => left.collectedAt.localeCompare(right.collectedAt))
+    .slice(-hourlyEventLimit);
+  return [...older, ...recent].sort((left, right) => left.collectedAt.localeCompare(right.collectedAt));
 }
 
 function serviceStatusHistory(status: StatusView, service: ServiceDefinition): StatusBarEntry[] {
   const serviceSnapshot = status.snapshot?.services.find((entry) => entry.serviceId === service.id);
-  const fromSummaries = status.dailySummaries
-    .map((summary) => {
-      const serviceSummary = summary.serviceSummaries.find((entry) => entry.serviceId === service.id);
-      if (!serviceSummary) {
-        return null;
-      }
-      const durationSummary = summarizeSeconds(serviceSummary.secondsByStatus);
-      return {
-        key: `${service.id}-${summary.day}`,
-        day: summary.day,
-        status: serviceSummary.overallStatus,
-        summary: [serviceSummary.latestSummary, durationSummary].filter(Boolean).join(" · ") || statusLabel(serviceSummary.overallStatus),
-        firstCollectedAt: serviceSummary.firstCollectedAt,
-        lastCollectedAt: serviceSummary.lastCollectedAt,
-        sampleCount: serviceSummary.sampleCount
-      };
-    })
-    .filter((entry): entry is StatusBarEntry => Boolean(entry))
-    .sort((left, right) => left.day.localeCompare(right.day))
-    .slice(-serviceHistoryLimit);
+  const fromEvents = decimateServiceEvents(status.serviceEvents.filter((event) => event.serviceId === service.id)).map((event) => ({
+    key: event.id,
+    collectedAt: event.collectedAt,
+    status: event.status,
+    summary: event.summary || statusLabel(event.status),
+    sourceType: event.sourceType,
+    sourceRef: event.sourceRef
+  }));
 
-  if (fromSummaries.length > 0) {
-    return fromSummaries;
+  if (fromEvents.length > 0) {
+    return fromEvents;
   }
 
   const observedAt = serviceSnapshot?.lastCheckedAt ?? status.snapshot?.collectedAt ?? new Date().toISOString();
   return [
     {
       key: `${service.id}-current`,
-      day: observedAt.slice(0, 10),
+      collectedAt: observedAt,
       status: serviceSnapshot?.status ?? "unknown",
       summary: serviceSnapshot?.summary ?? "Awaiting collection",
-      firstCollectedAt: observedAt,
-      lastCollectedAt: observedAt,
-      sampleCount: serviceSnapshot ? 1 : 0
+      sourceType: "snapshot",
+      sourceRef: service.sourceRef
     }
   ];
 }
 
 function statusBarTitle(entry: StatusBarEntry): string {
   return [
-    `${formatDay(entry.day)}: ${statusLabel(entry.status)}`,
+    `${formatDateTime(entry.collectedAt)}: ${statusLabel(entry.status)}`,
     entry.summary,
-    `Samples: ${entry.sampleCount}`,
-    `Observed: ${new Date(entry.firstCollectedAt).toLocaleString()} - ${new Date(entry.lastCollectedAt).toLocaleString()}`
+    `Source: ${entry.sourceType}${entry.sourceRef ? ` · ${entry.sourceRef}` : ""}`
   ].join("\n");
 }
 
@@ -689,7 +696,7 @@ export function StatusPage() {
                             className="status-history-bar"
                             style={{ backgroundColor: colorFor(entry.status, status.colors) }}
                             title={statusBarTitle(entry)}
-                            aria-label={`${formatDay(entry.day)} ${statusLabel(entry.status)}`}
+                            aria-label={`${formatDateTime(entry.collectedAt)} ${statusLabel(entry.status)}`}
                             tabIndex={0}
                           />
                         ))}

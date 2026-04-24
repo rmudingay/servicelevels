@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppMeta, AuthMode, PlatformSettings, StatusView } from "@service-levels/shared";
+import type { AppMeta, AuthMode, PlatformSettings, StatusLevel, StatusView } from "@service-levels/shared";
 import {
   AdminPage,
   StatusPage,
@@ -340,6 +340,51 @@ function buildStatusView(): StatusView {
       ],
       rawPayload: {}
     },
+    serviceEvents: [
+      {
+        id: "event-prom-0955",
+        tenantId: "tenant-primary-site",
+        serviceId: "svc-prom",
+        snapshotId: "snapshot-prom-0955",
+        collectedAt: "2026-04-20T09:55:00.000Z",
+        status: "maintenance",
+        summary: "Prometheus rollout in progress",
+        sourceType: "prometheus",
+        sourceRef: "up"
+      },
+      {
+        id: "event-prom-1000",
+        tenantId: "tenant-primary-site",
+        serviceId: "svc-prom",
+        snapshotId: "snapshot-1",
+        collectedAt: "2026-04-20T10:00:00.000Z",
+        status: "maintenance",
+        summary: "Prometheus rollout still in progress",
+        sourceType: "prometheus",
+        sourceRef: "up"
+      },
+      ...[
+        ["event-network-0700", "2026-04-20T07:00:00.000Z", "healthy", "Core router healthy"],
+        ["event-network-0800", "2026-04-20T08:00:00.000Z", "healthy", "Core router healthy"],
+        ["event-network-0905", "2026-04-20T09:05:00.000Z", "degraded", "Latency warning started"],
+        ["event-network-0915", "2026-04-20T09:15:00.000Z", "degraded", "Latency warning continued"],
+        ["event-network-0925", "2026-04-20T09:25:00.000Z", "degraded", "Latency warning continued"],
+        ["event-network-0935", "2026-04-20T09:35:00.000Z", "down", "Interface ge-0/0/8(): Link down"],
+        ["event-network-0945", "2026-04-20T09:45:00.000Z", "down", "Interface ge-0/0/8(): Link down"],
+        ["event-network-0955", "2026-04-20T09:55:00.000Z", "degraded", "Routing path recovering"],
+        ["event-network-1000", "2026-04-20T10:00:00.000Z", "degraded", "Latency elevated on the core router"]
+      ].map(([id, collectedAt, status, summary]) => ({
+        id,
+        tenantId: "tenant-primary-site",
+        serviceId: "svc-network",
+        snapshotId: id.replace("event", "snapshot"),
+        collectedAt,
+        status: status as StatusLevel,
+        summary,
+        sourceType: "zabbix" as const,
+        sourceRef: "router"
+      }))
+    ],
     dailySummaries: [
       {
         tenantId: "tenant-primary-site",
@@ -516,7 +561,11 @@ describe("status UI", () => {
     expect(screen.getByText("Deploying Prometheus rules.")).toBeInTheDocument();
     expect(screen.getAllByText("Core Router").length).toBeGreaterThan(0);
     expect(screen.getByText(/Investigating transient route instability/)).toBeInTheDocument();
-    expect(screen.getAllByLabelText("Core Router status history").length).toBeGreaterThan(0);
+    const coreRouterHistory = screen.getAllByLabelText("Core Router status history")[0];
+    const coreRouterBars = coreRouterHistory.querySelectorAll(".status-history-bar");
+    expect(coreRouterBars.length).toBe(8);
+    expect(coreRouterBars[0].getAttribute("title")).toContain("Healthy");
+    expect(coreRouterBars[7].getAttribute("title")).toContain("Source: zabbix");
   });
 
   it("toggles and persists dark mode on the Cachet-style status page", async () => {

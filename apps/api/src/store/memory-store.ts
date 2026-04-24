@@ -11,6 +11,7 @@ import type {
   NotificationSubscription,
   PlatformSettings,
   ServiceDailySummary,
+  ServiceStatusEvent,
   Snapshot,
   StatusDailySummary,
   StatusLevel,
@@ -21,7 +22,7 @@ import type {
 import { createHash } from "node:crypto";
 import { nowIso, slugify, worstStatus } from "../utils.js";
 import { clonePlatformSettings, platformSettingsFromConfig } from "../settings.js";
-import { mergeSummaryStatus, severityTrend, splitUtcIntervalByDay, utcDayKey } from "./utils.js";
+import { mergeSummaryStatus, serviceStatusEventsFromSnapshot, severityTrend, splitUtcIntervalByDay, utcDayKey } from "./utils.js";
 import type { AppConfig } from "../config.js";
 
 type InternalState = {
@@ -37,6 +38,7 @@ type InternalState = {
   subscriptions: NotificationSubscription[];
   colors: ColorMapping[];
   snapshots: Snapshot[];
+  serviceEvents: ServiceStatusEvent[];
   dailySummaries: StatusDailySummary[];
   users: AdminUser[];
   passwordHashes: Record<string, string>;
@@ -371,6 +373,7 @@ function seedState(config: AppConfig): InternalState {
     subscriptions: [],
     colors,
     snapshots: [snapshot],
+    serviceEvents: serviceStatusEventsFromSnapshot(snapshot, services),
     dailySummaries: [
       {
         tenantId: tenant.id,
@@ -477,6 +480,12 @@ export class MemoryStore {
     return snapshots.at(-1) ?? null;
   }
 
+  async getServiceStatusEvents(tenantId?: string): Promise<ServiceStatusEvent[]> {
+    return this.state.serviceEvents
+      .filter((event) => !tenantId || event.tenantId === tenantId)
+      .sort((left, right) => left.collectedAt.localeCompare(right.collectedAt));
+  }
+
   async getDailySummaries(tenantId?: string): Promise<StatusDailySummary[]> {
     return this.state.dailySummaries
       .filter((entry) => !tenantId || entry.tenantId === tenantId)
@@ -501,6 +510,7 @@ export class MemoryStore {
       subscriptions: await this.getSubscriptions(tenant?.id),
       colors: await this.getColors(tenant?.id),
       snapshot: tenant ? await this.getLatestSnapshot(tenant.id) : null,
+      serviceEvents: tenant ? await this.getServiceStatusEvents(tenant.id) : [],
       dailySummaries: tenant ? await this.getDailySummaries(tenant.id) : []
     };
   }
@@ -668,6 +678,7 @@ export class MemoryStore {
     this.state.subscriptions = this.state.subscriptions.filter((entry) => entry.tenantId !== tenantId);
     this.state.colors = this.state.colors.filter((entry) => entry.tenantId !== tenantId);
     this.state.snapshots = this.state.snapshots.filter((entry) => entry.tenantId !== tenantId);
+    this.state.serviceEvents = this.state.serviceEvents.filter((entry) => entry.tenantId !== tenantId);
     this.state.dailySummaries = this.state.dailySummaries.filter((entry) => entry.tenantId !== tenantId);
     return true;
   }
@@ -707,6 +718,7 @@ export class MemoryStore {
     this.state.incidents = this.state.incidents.filter((entry) => entry.serviceId !== serviceId);
     this.state.maintenance = this.state.maintenance.filter((entry) => entry.serviceId !== serviceId);
     this.state.subscriptions = this.state.subscriptions.filter((entry) => entry.serviceId !== serviceId);
+    this.state.serviceEvents = this.state.serviceEvents.filter((entry) => entry.serviceId !== serviceId);
     this.state.dailySummaries = this.state.dailySummaries.map((summary) => ({
       ...summary,
       serviceSummaries: summary.serviceSummaries.filter((entry) => entry.serviceId !== serviceId)
@@ -885,8 +897,14 @@ export class MemoryStore {
 
   async saveSnapshot(snapshot: Snapshot): Promise<Snapshot> {
     const previous = await this.getLatestSnapshot(snapshot.tenantId);
+    const serviceEvents = serviceStatusEventsFromSnapshot(snapshot, this.state.services);
+    const eventCutoff = new Date(Date.parse(snapshot.collectedAt) - 32 * 24 * 60 * 60 * 1000).toISOString();
     this.state.snapshots = this.state.snapshots.filter((entry) => entry.tenantId !== snapshot.tenantId);
     this.state.snapshots = [...this.state.snapshots, snapshot];
+    this.state.serviceEvents = [
+      ...this.state.serviceEvents.filter((event) => event.tenantId !== snapshot.tenantId || (event.collectedAt >= eventCutoff && event.snapshotId !== snapshot.id)),
+      ...serviceEvents
+    ].sort((left, right) => left.tenantId.localeCompare(right.tenantId) || left.collectedAt.localeCompare(right.collectedAt));
 
     const summaries = new Map(
       this.state.dailySummaries

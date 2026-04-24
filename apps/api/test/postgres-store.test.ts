@@ -19,6 +19,7 @@ async function createTestSchema(pool: Pool, config: ReturnType<typeof loadConfig
     "CREATE TABLE subscriptions (id text PRIMARY KEY, tenant_id text, service_id text, channel_type text, target text, enabled boolean)",
     "CREATE TABLE colors (tenant_id text, status_key text, color_hex text, label text, PRIMARY KEY (tenant_id, status_key))",
     "CREATE TABLE snapshots (id text PRIMARY KEY, tenant_id text UNIQUE, collected_at timestamptz, overall_status text, services jsonb, raw_payload jsonb)",
+    "CREATE TABLE service_status_events (id text PRIMARY KEY, tenant_id text, service_id text, snapshot_id text, collected_at timestamptz, status text, summary text, source_type text, source_ref text)",
     "CREATE TABLE daily_status_summaries (tenant_id text, day text, overall_status text, seconds_by_status jsonb, first_collected_at timestamptz, last_collected_at timestamptz, sample_count integer, service_summaries jsonb, PRIMARY KEY (tenant_id, day))",
     "CREATE TABLE users (id text PRIMARY KEY, username text, display_name text, email text, auth_type text, is_admin boolean, enabled boolean, password_hash text)"
   ];
@@ -84,10 +85,12 @@ test("PostgresStore persists connectors, latest snapshots, and daily summaries",
   try {
     const connectors = await reopened.getConnectors("tenant-primary-site");
     const latest = await reopened.getLatestSnapshot("tenant-primary-site");
+    const serviceEvents = await reopened.getServiceStatusEvents("tenant-primary-site");
     const summaries = await reopened.getDailySummaries("tenant-primary-site");
 
     assert.equal(connectors.some((entry) => entry.id === connector.id), true);
     assert.equal(latest?.id, "snapshot-integration");
+    assert.equal(serviceEvents.some((entry) => entry.snapshotId === "snapshot-integration" && entry.serviceId === "svc-prom"), true);
     assert.equal(latest?.overallStatus, "degraded");
     assert.equal(summaries.some((entry) => entry.day === "2026-04-20" && entry.overallStatus === "degraded"), true);
     assert.equal(summaries.some((entry) => entry.serviceSummaries.some((service) => service.serviceId === "svc-prom" && service.overallStatus === "degraded")), true);

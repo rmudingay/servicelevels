@@ -187,6 +187,18 @@ export interface Snapshot {
   rawPayload: unknown;
 }
 
+export interface ServiceStatusEvent {
+  id: string;
+  tenantId: string;
+  serviceId: string;
+  snapshotId: string;
+  collectedAt: string;
+  status: StatusLevel;
+  summary: string;
+  sourceType: ConnectorType;
+  sourceRef: string;
+}
+
 export interface ServiceDailySummary {
   tenantId: string;
   serviceId: string;
@@ -241,5 +253,6 @@ export interface StatusView {
   subscriptions: NotificationSubscription[];
   colors: ColorMapping[];
   snapshot: Snapshot | null;
+  serviceEvents: ServiceStatusEvent[];
   dailySummaries: StatusDailySummary[];
 }

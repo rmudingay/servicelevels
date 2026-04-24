@@ -9,6 +9,7 @@ import type {
   MaintenanceWindow,
   NotificationSubscription,
   PlatformSettings,
+  ServiceStatusEvent,
   Snapshot,
   StatusDailySummary,
   StatusLevel,
@@ -36,6 +37,7 @@ export interface StatusRepository {
   getDailySummaries(tenantId?: string): Promise<StatusDailySummary[]>;
   getColors(tenantId?: string): Promise<ColorMapping[]>;
   getLatestSnapshot(tenantId?: string): Promise<Snapshot | null>;
+  getServiceStatusEvents(tenantId?: string): Promise<ServiceStatusEvent[]>;
   getStatusView(tenantSlug?: string): Promise<StatusView>;
   listUsers(): Promise<AdminUser[]>;
   findUserByUsername(username: string): Promise<AdminUser | undefined>;

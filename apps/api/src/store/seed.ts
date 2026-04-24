@@ -10,6 +10,7 @@ import type {
   MaintenanceWindow,
   NotificationSubscription,
   PlatformSettings,
+  ServiceStatusEvent,
   Snapshot,
   StatusDailySummary,
   StatusLevel,
@@ -19,7 +20,7 @@ import type {
 import type { AppConfig } from "../config.js";
 import { platformSettingsFromConfig } from "../settings.js";
 import { nowIso } from "../utils.js";
-import { utcDayKey } from "./utils.js";
+import { serviceStatusEventsFromSnapshot, utcDayKey } from "./utils.js";
 
 export type SeedState = {
   meta: AppMeta;
@@ -34,6 +35,7 @@ export type SeedState = {
   subscriptions: NotificationSubscription[];
   colors: ColorMapping[];
   snapshots: Snapshot[];
+  serviceEvents: ServiceStatusEvent[];
   dailySummaries: StatusDailySummary[];
   users: AdminUser[];
   platformSettings: PlatformSettings;
@@ -323,6 +325,7 @@ export function buildSeedState(config: AppConfig): SeedState {
     subscriptions: [],
     colors,
     snapshots: [snapshot],
+    serviceEvents: serviceStatusEventsFromSnapshot(snapshot, services),
     dailySummaries: [dailySummary],
     users: [
       {

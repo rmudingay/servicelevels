@@ -499,8 +499,8 @@ textarea:focus {
 }
 
 .cachet-page .status-history-bars {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(3px, 1fr));
+  display: flex;
+  justify-content: flex-end;
   gap: 2px;
   align-items: stretch;
   width: 100%;
@@ -511,7 +511,9 @@ textarea:focus {
 
 .cachet-page .status-history-bar {
   display: block;
-  min-width: 3px;
+  width: 5px;
+  min-width: 5px;
+  flex: 0 0 5px;
   height: 28px;
   border-radius: 2px;
   cursor: help;

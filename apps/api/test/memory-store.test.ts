@@ -32,9 +32,11 @@ test("saveSnapshot stores the latest snapshot and daily rollups", async () => {
   await store.saveSnapshot(second);
 
   const latest = await store.getLatestSnapshot("tenant-primary-site");
+  const serviceEvents = await store.getServiceStatusEvents("tenant-primary-site");
   const summaries = await store.getDailySummaries("tenant-primary-site");
 
   assert.equal(latest?.id, "snapshot-2");
+  assert.equal(serviceEvents.some((entry) => entry.snapshotId === "snapshot-2" && entry.serviceId === "svc-prom"), true);
   assert.equal(summaries.length >= 2, true);
 
   const yesterday = summaries.find((entry) => entry.day === "2026-04-18");

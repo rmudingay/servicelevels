@@ -125,6 +125,17 @@ export const migrations: Migration[] = [
         sample_count integer NOT NULL DEFAULT 0,
         PRIMARY KEY (tenant_id, day)
       )`,
+      `CREATE TABLE IF NOT EXISTS service_status_events (
+        id text PRIMARY KEY,
+        tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        service_id text NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+        snapshot_id text NOT NULL,
+        collected_at timestamptz NOT NULL,
+        status text NOT NULL,
+        summary text NOT NULL DEFAULT '',
+        source_type text NOT NULL,
+        source_ref text NOT NULL DEFAULT ''
+      )`,
       `CREATE TABLE IF NOT EXISTS users (
         id text PRIMARY KEY,
         username text NOT NULL UNIQUE,
@@ -142,7 +153,8 @@ export const migrations: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_incidents_tenant_opened ON incidents (tenant_id, opened_at DESC)`,
       `CREATE INDEX IF NOT EXISTS idx_maintenance_tenant_starts ON maintenance_windows (tenant_id, starts_at DESC)`,
       `CREATE INDEX IF NOT EXISTS idx_snapshots_tenant_collected ON snapshots (tenant_id, collected_at DESC)`,
-      `CREATE INDEX IF NOT EXISTS idx_daily_summaries_tenant_day ON daily_status_summaries (tenant_id, day DESC)`
+      `CREATE INDEX IF NOT EXISTS idx_daily_summaries_tenant_day ON daily_status_summaries (tenant_id, day DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_service_status_events_tenant_service_collected ON service_status_events (tenant_id, service_id, collected_at DESC)`
     ]
   },
   {
@@ -170,6 +182,23 @@ export const migrations: Migration[] = [
       `ALTER TABLE banners ADD COLUMN IF NOT EXISTS updated_at timestamptz NULL`,
       `ALTER TABLE banners ADD COLUMN IF NOT EXISTS severity_trend text NULL`,
       `UPDATE banners SET updated_at = COALESCE(updated_at, starts_at, now()) WHERE updated_at IS NULL`
+    ]
+  },
+  {
+    id: "006_service_status_events",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS service_status_events (
+        id text PRIMARY KEY,
+        tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        service_id text NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+        snapshot_id text NOT NULL,
+        collected_at timestamptz NOT NULL,
+        status text NOT NULL,
+        summary text NOT NULL DEFAULT '',
+        source_type text NOT NULL,
+        source_ref text NOT NULL DEFAULT ''
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_service_status_events_tenant_service_collected ON service_status_events (tenant_id, service_id, collected_at DESC)`
     ]
   }
 ];
