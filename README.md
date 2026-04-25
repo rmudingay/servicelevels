@@ -38,10 +38,37 @@ The repository includes a ready-to-run `docker-compose.yml` with:
 - `app`: API and frontend delivery on port `8080`
 - `worker`: scheduled collector and notification processor
 
-Start the stack:
+Start the stack with the default pinned application image version (`v0.1.0`):
 
 ```bash
-docker compose up --build
+podman compose pull
+podman compose up -d
+```
+
+To run a different published version, set `SERVICELEVELS_VERSION` before starting the stack:
+
+```bash
+SERVICELEVELS_VERSION=v0.1.1 podman compose up -d
+```
+
+For a persistent deployment setting, place the version in a local `.env` file:
+
+```env
+SERVICELEVELS_VERSION=v0.1.0
+```
+
+Release images are published from Git tags to GitHub Container Registry:
+
+```bash
+git tag -a v0.1.0 -m "v0.1.0"
+git push origin v0.1.0
+```
+
+The compose file uses `ghcr.io/rmudingay/servicelevels:${SERVICELEVELS_VERSION}` for both the API/frontend container and the worker container. To upgrade, change `SERVICELEVELS_VERSION`, then run:
+
+```bash
+podman compose pull
+podman compose up -d
 ```
 
 The default endpoints are:

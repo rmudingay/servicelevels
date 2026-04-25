@@ -14,9 +14,7 @@ services:
       retries: 10
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: "${SERVICELEVELS_IMAGE:-ghcr.io/rmudingay/servicelevels}:${SERVICELEVELS_VERSION:-v0.1.0}"
     depends_on:
       db:
         condition: service_healthy
@@ -35,9 +33,7 @@ services:
       - "8080:8080"
 
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: "${SERVICELEVELS_IMAGE:-ghcr.io/rmudingay/servicelevels}:${SERVICELEVELS_VERSION:-v0.1.0}"
     depends_on:
       db:
         condition: service_healthy
