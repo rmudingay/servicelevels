@@ -7,6 +7,8 @@ services:
       POSTGRES_PASSWORD: service_levels
     ports:
       - "5432:5432"
+    volumes:
+      - service_levels_db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U service_levels -d service_levels"]
       interval: 5s
@@ -14,7 +16,7 @@ services:
       retries: 10
 
   app:
-    image: "${SERVICELEVELS_IMAGE:-ghcr.io/rmudingay/servicelevels}:${SERVICELEVELS_VERSION:-v0.1.0}"
+    image: "${SERVICELEVELS_IMAGE:-ghcr.io/rmudingay/servicelevels}:${SERVICELEVELS_VERSION:-v0.1.1}"
     depends_on:
       db:
         condition: service_healthy
@@ -33,7 +35,7 @@ services:
       - "8080:8080"
 
   worker:
-    image: "${SERVICELEVELS_IMAGE:-ghcr.io/rmudingay/servicelevels}:${SERVICELEVELS_VERSION:-v0.1.0}"
+    image: "${SERVICELEVELS_IMAGE:-ghcr.io/rmudingay/servicelevels}:${SERVICELEVELS_VERSION:-v0.1.1}"
     depends_on:
       db:
         condition: service_healthy
@@ -50,3 +52,7 @@ services:
       JWT_SECRET: "dev-secret-change-me"
       CORS_ORIGIN: "http://localhost:5173,http://127.0.0.1:5173"
       WORKER_TICK_SECONDS: "60"
+
+volumes:
+  service_levels_db_data:
+    name: servicelevels_db_data

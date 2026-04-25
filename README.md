@@ -34,11 +34,11 @@ The current implementation includes:
 ### Docker Compose
 
 The repository includes a ready-to-run `docker-compose.yml` with:
-- `db`: PostgreSQL 16
+- `db`: PostgreSQL 16 with a persistent named volume, `servicelevels_db_data`
 - `app`: API and frontend delivery on port `8080`
 - `worker`: scheduled collector and notification processor
 
-Start the stack with the default pinned application image version (`v0.1.0`):
+Start the stack with the default pinned application image version (`v0.1.1`):
 
 ```bash
 podman compose pull
@@ -54,14 +54,14 @@ SERVICELEVELS_VERSION=v0.1.1 podman compose up -d
 For a persistent deployment setting, place the version in a local `.env` file:
 
 ```env
-SERVICELEVELS_VERSION=v0.1.0
+SERVICELEVELS_VERSION=v0.1.1
 ```
 
 Release images are published from Git tags to GitHub Container Registry:
 
 ```bash
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
+git tag -a v0.1.1 -m "v0.1.1"
+git push origin v0.1.1
 ```
 
 The compose file uses `ghcr.io/rmudingay/servicelevels:${SERVICELEVELS_VERSION}` for both the API/frontend container and the worker container. To upgrade, change `SERVICELEVELS_VERSION`, then run:
@@ -69,6 +69,20 @@ The compose file uses `ghcr.io/rmudingay/servicelevels:${SERVICELEVELS_VERSION}`
 ```bash
 podman compose pull
 podman compose up -d
+```
+
+Database settings and application configuration are stored in PostgreSQL. The compose file mounts PostgreSQL data into the named volume `servicelevels_db_data`, so normal application image upgrades do not reset tenants, connectors, banners, authentication settings, or other stored configuration.
+
+Do not use `podman compose down -v` unless you intentionally want to delete the database volume. If you previously ran an older compose file without a database volume, export the database before removing the old `db` container:
+
+```bash
+podman exec <db-container-name> pg_dump -U service_levels service_levels > service_levels_backup.sql
+```
+
+After starting the updated compose stack, restore the backup if needed:
+
+```bash
+podman exec -i <db-container-name> psql -U service_levels service_levels < service_levels_backup.sql
 ```
 
 The default endpoints are:
