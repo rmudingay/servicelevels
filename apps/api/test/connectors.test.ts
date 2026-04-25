@@ -153,8 +153,10 @@ test("Zabbix connector normalizes active problems into down status", async () =>
 test("Zabbix connector scopes global filters to matching services when services are listed", async () => {
   const originalFetch = globalThis.fetch;
   let calls = 0;
-  globalThis.fetch = async () => {
+  const requests: unknown[] = [];
+  globalThis.fetch = async (_url, init) => {
     calls += 1;
+    requests.push(JSON.parse(String(init?.body)));
     if (calls === 1) {
       return jsonResponse({
         jsonrpc: "2.0",
@@ -211,6 +213,7 @@ test("Zabbix connector scopes global filters to matching services when services 
     assert.equal(outcome.results.length, 1);
     assert.equal(outcome.results[0]?.serviceId, "svc-network");
     assert.equal(calls, 2);
+    assert.deepEqual((requests[0] as { params: { tags: unknown } }).params.tags, [{ tag: "Type", value: "Edge", operator: 0 }]);
   } finally {
     globalThis.fetch = originalFetch;
   }

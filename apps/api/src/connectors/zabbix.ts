@@ -23,7 +23,7 @@ type ZabbixMapping = {
   sourceRef?: string;
   name?: string;
   slug?: string;
-  tags?: string[];
+  tags?: Array<string | ZabbixTagFilter>;
   hostIds?: Array<string | number>;
   groupIds?: Array<string | number>;
   severities?: number[];
@@ -35,6 +35,8 @@ type ZabbixMapping = {
   healthySummary?: string;
 };
 
+type ZabbixTagFilter = { tag: string; value?: string; operator?: string | number };
+
 type ZabbixConfig = {
   baseUrl?: string;
   timeoutMs?: number;
@@ -43,7 +45,7 @@ type ZabbixConfig = {
   defaultStatus?: StatusLevel;
   hostIds?: Array<string | number>;
   groupIds?: Array<string | number>;
-  tags?: Array<{ tag: string; value?: string; operator?: string | number }>;
+  tags?: ZabbixTagFilter[];
   severities?: number[];
   evaltype?: number;
   services?: ZabbixMapping[];
@@ -87,7 +89,7 @@ function resolveServiceMapping(service: ServiceDefinition, config: ZabbixConfig)
   const globalMapping: ZabbixMapping = {
     hostIds: config.hostIds,
     groupIds: config.groupIds,
-    tags: config.tags?.map((tag) => tag.tag) ?? [],
+    tags: config.tags ?? [],
     severities: config.severities,
     evaltype: config.evaltype,
     summary: config.summary
@@ -105,12 +107,21 @@ function resolveServiceMapping(service: ServiceDefinition, config: ZabbixConfig)
   return hasActionableFilters(globalMapping) ? globalMapping : undefined;
 }
 
-function buildTagFilters(tags: Array<{ tag: string; value?: string; operator?: string | number }>): JsonObject[] {
-  return tags.map((entry) => ({
-    tag: entry.tag,
-    value: entry.value ?? "",
-    operator: entry.operator ?? "0"
-  }));
+function buildTagFilters(tags: Array<string | ZabbixTagFilter>): JsonObject[] {
+  return tags.map((entry) => {
+    if (typeof entry === "string") {
+      return {
+        tag: entry,
+        value: "",
+        operator: 0
+      };
+    }
+    return {
+      tag: entry.tag,
+      value: entry.value ?? "",
+      operator: entry.operator ?? 0
+    };
+  });
 }
 
 function zabbixTlsOptions(config: ZabbixConfig) {
@@ -245,7 +256,7 @@ async function collectZabbixService(
     commonParams.groupids = mapping.groupIds;
   }
   if (mapping.tags && mapping.tags.length > 0) {
-    commonParams.tags = mapping.tags.map((tag) => ({ tag, value: "", operator: 0 }));
+    commonParams.tags = buildTagFilters(mapping.tags);
   }
   if (mapping.severities && mapping.severities.length > 0) {
     commonParams.severities = mapping.severities;
