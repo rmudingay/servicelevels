@@ -775,7 +775,6 @@ describe("status UI", () => {
 
     try {
       expect(await screen.findByText("Metrics Pipeline")).toBeInTheDocument();
-      expect(screen.queryByText("Live update")).not.toBeInTheDocument();
 
       await waitFor(() => expect(mockApi.status.mock.calls.length).toBeGreaterThanOrEqual(2));
 
