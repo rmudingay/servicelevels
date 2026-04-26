@@ -16,7 +16,7 @@ services:
       retries: 10
 
   app:
-    image: "${SERVICELEVELS_IMAGE:-ghcr.io/rmudingay/servicelevels}:${SERVICELEVELS_VERSION:-v0.1.1}"
+    image: "${SERVICELEVELS_IMAGE:-ghcr.io/rmudingay/servicelevels}:${SERVICELEVELS_VERSION:-v0.2.0}"
     depends_on:
       db:
         condition: service_healthy
@@ -35,7 +35,7 @@ services:
       - "8080:8080"
 
   worker:
-    image: "${SERVICELEVELS_IMAGE:-ghcr.io/rmudingay/servicelevels}:${SERVICELEVELS_VERSION:-v0.1.1}"
+    image: "${SERVICELEVELS_IMAGE:-ghcr.io/rmudingay/servicelevels}:${SERVICELEVELS_VERSION:-v0.2.0}"
     depends_on:
       db:
         condition: service_healthy

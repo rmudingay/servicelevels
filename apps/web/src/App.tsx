@@ -97,12 +97,12 @@ export function statusLabel(status: StatusLevel): string {
     case "maintenance":
       return "Maintenance";
     default:
-      return "Unknown";
+      return "No data";
   }
 }
 
 export function colorFor(status: StatusLevel, colors: ColorMapping[]): string {
-  return colors.find((entry) => entry.statusKey === status)?.colorHex ?? "#7A7F87";
+  return colors.find((entry) => entry.statusKey === status)?.colorHex ?? "#7C3AED";
 }
 
 type StatusBarEntry = {
@@ -116,6 +116,12 @@ type StatusBarEntry = {
 
 const recentEventLimit = 6;
 const hourlyEventLimit = 24;
+export const defaultStatusRefreshIntervalMs = 15_000;
+
+export function getStatusRefreshIntervalMs(): number {
+  const configured = (globalThis as { __SERVICE_LEVELS_STATUS_REFRESH_MS__?: number }).__SERVICE_LEVELS_STATUS_REFRESH_MS__;
+  return typeof configured === "number" && Number.isFinite(configured) && configured > 0 ? configured : defaultStatusRefreshIntervalMs;
+}
 
 function formatDateTime(value?: string | null): string {
   if (!value) {
@@ -436,6 +442,7 @@ export function StatusPage() {
   });
   const [tenantSlug, setTenantSlug] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [refreshMessage, setRefreshMessage] = useState("");
   const [themeMode, setThemeMode] = useThemeMode("light");
   const [needsAuth, setNeedsAuth] = useState(false);
   const [loginMode, setLoginMode] = useState<AuthMode>("local");
@@ -471,31 +478,50 @@ export function StatusPage() {
 
   useEffect(() => {
     let mounted = true;
-    setLoading(true);
+    let refreshTimer: ReturnType<typeof setInterval> | undefined;
+
+    async function loadStatus(showInitialLoading: boolean): Promise<void> {
+      if (showInitialLoading) {
+        setLoading(true);
+      }
+      try {
+        const view = await api.status(tenantSlug || undefined);
+        if (!mounted) {
+          return;
+        }
+        setStatus(view);
+        setNeedsAuth(false);
+        setRefreshMessage("");
+        setLoading(false);
+        if (!document.cookie.includes("ess_theme=")) {
+          setThemeMode(view.meta.themeDefault);
+        }
+      } catch (error: unknown) {
+        if (!mounted) {
+          return;
+        }
+        setLoading(false);
+        if (error instanceof ApiError && error.status === 401) {
+          setNeedsAuth(true);
+          return;
+        }
+        setRefreshMessage("The status service is not reachable. Showing the latest loaded data if available.");
+      }
+    }
+
     setNeedsAuth(false);
-    void api
-      .status(tenantSlug || undefined)
-      .then((view) => {
-        if (mounted) {
-          setStatus(view);
-          setLoading(false);
-          if (!document.cookie.includes("ess_theme=")) {
-            setThemeMode(view.meta.themeDefault);
-          }
-        }
-      })
-      .catch((error: unknown) => {
-        if (mounted) {
-          setLoading(false);
-          if (error instanceof ApiError && error.status === 401) {
-            setNeedsAuth(true);
-          }
-        }
-      });
+    void loadStatus(true);
+    refreshTimer = setInterval(() => {
+      void loadStatus(false);
+    }, getStatusRefreshIntervalMs());
+
     return () => {
       mounted = false;
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+      }
     };
-  }, [tenantSlug]);
+  }, [tenantSlug, setThemeMode]);
 
   const selectedStatusLoginMode =
     authOptions.publicAuthMode !== "public" && authOptions.publicAuthMode !== "ip" ? authOptions.publicAuthMode : loginMode;
@@ -631,8 +657,14 @@ export function StatusPage() {
     .sort((left, right) => right.localeCompare(left))
     .slice(0, 7);
   const visibleTimelineDays = timelineDays.length > 0 ? timelineDays : [new Date().toISOString().slice(0, 10)];
-  const statusAlertClass = overallStatus === "healthy" ? "alert-success" : overallStatus === "down" ? "alert-danger" : "alert-info";
-  const statusAlertMessage = overallStatus === "healthy" ? "All systems are operational" : "Some systems are experiencing issues";
+  const statusAlertClass =
+    overallStatus === "healthy" ? "alert-success" : overallStatus === "down" ? "alert-danger" : overallStatus === "unknown" ? "alert-unknown" : "alert-info";
+  const statusAlertMessage =
+    overallStatus === "healthy"
+      ? "All systems are operational"
+      : overallStatus === "unknown"
+        ? "Some status data is unavailable"
+        : "Some systems are experiencing issues";
   const displayDay = (day: string) =>
     new Date(`${day}T12:00:00`).toLocaleDateString(undefined, {
       day: "numeric",
@@ -655,6 +687,7 @@ export function StatusPage() {
 
         <div className="section-status">
           <div className={`alert ${statusAlertClass}`}>{statusAlertMessage}</div>
+          {refreshMessage && <div className="cachet-refresh-message">{refreshMessage}</div>}
         </div>
 
         <div className="about-app">

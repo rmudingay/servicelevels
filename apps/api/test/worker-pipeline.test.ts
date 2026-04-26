@@ -162,6 +162,46 @@ test("collectTenantCycle marks connector-owned services as maintenance during co
   assert.equal(serviceStatus?.summary, "Prometheus is paused during platform maintenance.");
 });
 
+test("collectTenantCycle marks connector-owned services as no data when collection fails", async () => {
+  const config = loadConfig({});
+  const store = new MemoryStore(config);
+  const tenant = (await store.getTenants())[0];
+  assert.ok(tenant);
+  const zabbixService = (await store.getServices(tenant.id)).find((entry) => entry.sourceType === "zabbix");
+  assert.ok(zabbixService);
+  const zabbixConnector = await store.createConnector(tenant.id, {
+    type: "zabbix",
+    name: "failing zabbix",
+    configJson: JSON.stringify({
+      baseUrl: "https://zabbix.example/api_jsonrpc.php",
+      mode: "api",
+      services: [{ name: zabbixService.name, hostIds: [10101] }]
+    }),
+    authJson: JSON.stringify({ token: "static-token" }),
+    enabled: true,
+    pollIntervalSeconds: 300
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    const cause = Object.assign(new Error("getaddrinfo ENOTFOUND zabbix.example"), { code: "ENOTFOUND" });
+    throw Object.assign(new TypeError("fetch failed"), { cause });
+  };
+
+  try {
+    const cycle = await collectTenantCycle(store, tenant);
+    const serviceStatus = cycle.snapshot?.services.find((entry) => entry.serviceId === zabbixService.id);
+
+    assert.equal(cycle.connectorRuns.some((run) => run.connector.id === zabbixConnector.id && run.status === "error"), true);
+    assert.equal(serviceStatus?.status, "unknown");
+    assert.match(serviceStatus?.summary ?? "", /No data: Request to/);
+    assert.match(serviceStatus?.summary ?? "", /ENOTFOUND/);
+    assert.equal(cycle.snapshot?.overallStatus, "unknown");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("ingestWebhookEvent applies overall status to all services when no service match is provided", async () => {
   const config = loadConfig({});
   const store = new MemoryStore(config);

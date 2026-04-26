@@ -12,6 +12,7 @@ import {
   browserRedirect,
   colorFor,
   currentReturnPath,
+  getStatusRefreshIntervalMs,
   matchesFilter,
   statusLabel,
   statusRank
@@ -332,7 +333,7 @@ function buildStatusView(): StatusView {
       { tenantId: "tenant-primary-site", statusKey: "degraded", colorHex: "#D9A441", label: "Degraded" },
       { tenantId: "tenant-primary-site", statusKey: "down", colorHex: "#D94B4B", label: "Down" },
       { tenantId: "tenant-primary-site", statusKey: "maintenance", colorHex: "#4A90E2", label: "Maintenance" },
-      { tenantId: "tenant-primary-site", statusKey: "unknown", colorHex: "#7A7F87", label: "Unknown" }
+      { tenantId: "tenant-primary-site", statusKey: "unknown", colorHex: "#7C3AED", label: "No data" }
     ],
     snapshot: {
       id: "snapshot-1",
@@ -511,7 +512,8 @@ describe("web UI helpers", () => {
     expect(statusRank("down")).toBeGreaterThan(statusRank("degraded"));
     expect(statusLabel("maintenance")).toBe("Maintenance");
     expect(colorFor("healthy", view.colors)).toBe("#3BB273");
-    expect(colorFor("unknown", [])).toBe("#7A7F87");
+    expect(statusLabel("unknown")).toBe("No data");
+    expect(colorFor("unknown", [])).toBe("#7C3AED");
     expect(matchesFilter(service, "category:network tag:critical")).toBe(true);
     expect(matchesFilter(service, "service:core-router")).toBe(true);
     expect(matchesFilter(service, "metrics")).toBe(false);
@@ -527,6 +529,15 @@ describe("web UI helpers", () => {
   it("returns the current browser path for SSO round trips", () => {
     window.history.pushState({}, "", "/admin?tenant=primary-site#users");
     expect(currentReturnPath()).toBe("/admin?tenant=primary-site#users");
+  });
+
+  it("supports a test override for the status refresh interval", () => {
+    (globalThis as { __SERVICE_LEVELS_STATUS_REFRESH_MS__?: number }).__SERVICE_LEVELS_STATUS_REFRESH_MS__ = 25;
+    try {
+      expect(getStatusRefreshIntervalMs()).toBe(25);
+    } finally {
+      delete (globalThis as { __SERVICE_LEVELS_STATUS_REFRESH_MS__?: number }).__SERVICE_LEVELS_STATUS_REFRESH_MS__;
+    }
   });
 });
 
@@ -715,6 +726,66 @@ describe("status UI", () => {
     );
 
     expect(await screen.findByText("The status service is not reachable.")).toBeInTheDocument();
+  });
+
+  it("refreshes the public status view without a page reload", async () => {
+    (globalThis as { __SERVICE_LEVELS_STATUS_REFRESH_MS__?: number }).__SERVICE_LEVELS_STATUS_REFRESH_MS__ = 10;
+    const first = buildStatusView();
+    const second = buildStatusView();
+    second.banners = [
+      ...second.banners,
+      {
+        id: "banner-live",
+        tenantId: "tenant-primary-site",
+        scopeType: "tenant",
+        scopeRef: "primary-site",
+        title: "Live update",
+        message: "Updated through polling.",
+        severity: "unknown",
+        startsAt: null,
+        endsAt: null,
+        updatedAt: "2026-04-20T10:10:00.000Z",
+        severityTrend: "worse",
+        active: true
+      }
+    ];
+    second.snapshot = second.snapshot
+      ? {
+          ...second.snapshot,
+          overallStatus: "unknown",
+          services: second.snapshot.services.map((entry) =>
+            entry.serviceId === "svc-network"
+              ? {
+                  ...entry,
+                  status: "unknown",
+                  summary: "No data: connector collection failed",
+                  lastCheckedAt: "2026-04-20T10:10:00.000Z"
+                }
+              : entry
+          )
+        }
+      : second.snapshot;
+    mockApi.status.mockResolvedValueOnce(first).mockResolvedValue(second);
+
+    const { unmount } = render(
+      <MemoryRouter>
+        <StatusPage />
+      </MemoryRouter>
+    );
+
+    try {
+      expect(await screen.findByText("Metrics Pipeline")).toBeInTheDocument();
+      expect(screen.queryByText("Live update")).not.toBeInTheDocument();
+
+      await waitFor(() => expect(mockApi.status.mock.calls.length).toBeGreaterThanOrEqual(2));
+
+      expect(await screen.findByText("Live update")).toBeInTheDocument();
+      expect(screen.getByText("Some status data is unavailable")).toBeInTheDocument();
+      expect(screen.getAllByText("No data: connector collection failed").length).toBeGreaterThan(0);
+    } finally {
+      unmount();
+      delete (globalThis as { __SERVICE_LEVELS_STATUS_REFRESH_MS__?: number }).__SERVICE_LEVELS_STATUS_REFRESH_MS__;
+    }
   });
 });
 

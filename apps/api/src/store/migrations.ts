@@ -213,6 +213,17 @@ export const migrations: Migration[] = [
       `ALTER TABLE connectors ADD COLUMN IF NOT EXISTS maintenance_end_at timestamptz NULL`,
       `ALTER TABLE connectors ADD COLUMN IF NOT EXISTS maintenance_message text NOT NULL DEFAULT ''`
     ]
+  },
+  {
+    id: "008_no_data_default_color",
+    statements: [
+      `UPDATE colors
+       SET color_hex = '#7C3AED',
+           label = 'No data'
+       WHERE status_key = 'unknown'
+         AND color_hex = '#7A7F87'
+         AND label = 'Unknown'`
+    ]
   }
 ];
 

@@ -17,7 +17,7 @@
   --amber: #f7ca18;
   --red: #ff6f6f;
   --blue: #3498db;
-  --unknown: #8b98a1;
+  --unknown: #7c3aed;
   --shadow: 0 14px 34px rgba(31, 45, 55, 0.08);
   --radius: 4px;
   --radius-sm: 3px;
@@ -42,7 +42,7 @@
   --amber: #f3c742;
   --red: #ff7d7d;
   --blue: #58aee8;
-  --unknown: #93a0a8;
+  --unknown: #a78bfa;
   --shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
   --focus: 0 0 0 3px rgba(25, 214, 106, 0.2);
 }
@@ -395,6 +395,18 @@ textarea:focus {
 .cachet-page .alert-danger {
   background-color: var(--red);
   border-color: color-mix(in srgb, var(--red) 82%, black);
+}
+
+.cachet-page .alert-unknown {
+  background-color: var(--unknown);
+  border-color: color-mix(in srgb, var(--unknown) 82%, black);
+}
+
+.cachet-page .cachet-refresh-message {
+  margin-top: -10px;
+  margin-bottom: 20px;
+  color: var(--muted-strong);
+  font-size: 12px;
 }
 
 .cachet-page .about-app {

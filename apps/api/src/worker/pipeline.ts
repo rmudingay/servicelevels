@@ -3,7 +3,7 @@ import { nowIso } from "../utils.js";
 import { statusSummary, worstStatus } from "../store/utils.js";
 import type { StatusRepository } from "../store/types.js";
 import type { ConnectorRun, ServiceResult } from "../connectors/shared.js";
-import { bannerMatchesService } from "../connectors/shared.js";
+import { bannerMatchesService, isRecord, parseJsonObject } from "../connectors/shared.js";
 import { collectConnector } from "../connectors/index.js";
 import type { AppConfig } from "../config.js";
 import { processStatusEvents } from "../notifications.js";
@@ -48,6 +48,70 @@ function fingerprintSnapshot(snapshot: Snapshot): string {
   });
 }
 
+function mappingValues(mapping: unknown): string[] {
+  if (typeof mapping === "string") {
+    return [mapping];
+  }
+  if (!isRecord(mapping)) {
+    return [];
+  }
+  return ["ref", "sourceRef", "slug", "name", "category", "topic", "sensor", "device", "group", "objid"]
+    .map((key) => mapping[key])
+    .map((value) => (typeof value === "string" || typeof value === "number" ? String(value).trim() : ""))
+    .filter(Boolean);
+}
+
+function valueMatchesService(value: string, service: ServiceDefinition): boolean {
+  const needle = value.toLowerCase();
+  return [service.id, service.slug, service.sourceRef, service.name, service.category, service.topic].some((candidate) => {
+    const normalized = candidate.toLowerCase();
+    return normalized === needle || normalized.includes(needle);
+  });
+}
+
+function connectorOwnsService(connector: IntegrationConnector, service: ServiceDefinition): boolean {
+  if (service.sourceType !== connector.type || !service.enabled) {
+    return false;
+  }
+  const config = parseJsonObject(connector.configJson);
+  const configuredServices = Array.isArray(config.services) ? config.services : [];
+  if (configuredServices.length === 0) {
+    return true;
+  }
+  return configuredServices.some((mapping) => mappingValues(mapping).some((value) => valueMatchesService(value, service)));
+}
+
+function noDataResult(input: {
+  tenant: Tenant;
+  tabs: TabDefinition[];
+  banners: Banner[];
+  connector: IntegrationConnector;
+  service: ServiceDefinition;
+  touchedAt: string;
+  summary: string;
+}): ServiceResult {
+  return {
+    serviceId: input.service.id,
+    status: "unknown",
+    summary: input.summary,
+    lastCheckedAt: input.touchedAt,
+    sourceConnectorId: input.connector.id,
+    sourceConnectorType: input.connector.type,
+    bannerIds: input.banners.filter((banner) => bannerMatchesService(banner, input.tenant, input.tabs, input.service)).map((banner) => banner.id)
+  };
+}
+
+function mergeServiceResults(results: ServiceResult[]): ServiceResult[] {
+  const byServiceId = new Map<string, ServiceResult>();
+  for (const result of results) {
+    const existing = byServiceId.get(result.serviceId);
+    if (!existing || worstStatus([existing.status, result.status]) === result.status) {
+      byServiceId.set(result.serviceId, result);
+    }
+  }
+  return Array.from(byServiceId.values());
+}
+
 export async function collectTenantCycle(repo: StatusRepository, tenant: Tenant): Promise<TenantCycle> {
   const [services, connectors, banners, tabs, previousSnapshot] = await Promise.all([
     repo.getServices(tenant.id),
@@ -69,7 +133,7 @@ export async function collectTenantCycle(repo: StatusRepository, tenant: Tenant)
   const serviceResults: ServiceResult[] = [];
 
   for (const connector of enabledConnectors) {
-    const scopedServices = services.filter((service) => service.sourceType === connector.type && service.enabled);
+    const scopedServices = services.filter((service) => connectorOwnsService(connector, service));
     const cycleNow = nowIso();
     if (scopedServices.length === 0) {
       connectorRuns.push({
@@ -111,11 +175,34 @@ export async function collectTenantCycle(repo: StatusRepository, tenant: Tenant)
     });
     connectorRuns.push(run);
     serviceResults.push(...results);
+    const resultServiceIds = new Set(results.map((result) => result.serviceId));
+    const missingServices = scopedServices.filter((service) => !resultServiceIds.has(service.id));
+    if (missingServices.length > 0) {
+      const summary =
+        run.status === "error"
+          ? `No data: ${run.errorMessage ?? "connector collection failed"}`
+          : `No data: ${connector.name} did not return a current status for this service`;
+      serviceResults.push(
+        ...missingServices.map((service) =>
+          noDataResult({
+            tenant,
+            tabs,
+            banners,
+            connector,
+            service,
+            touchedAt: run.touchedAt,
+            summary
+          })
+        )
+      );
+    }
   }
 
-  for (const service of services.filter((entry) => entry.enabled && !serviceResults.some((result) => result.serviceId === entry.id))) {
+  const mergedServiceResults = mergeServiceResults(serviceResults);
+
+  for (const service of services.filter((entry) => entry.enabled && !mergedServiceResults.some((result) => result.serviceId === entry.id))) {
     const fallback = previousSnapshot?.services.find((entry) => entry.serviceId === service.id);
-    serviceResults.push({
+    mergedServiceResults.push({
       serviceId: service.id,
       status: fallback?.status ?? "unknown",
       summary: fallback?.summary ?? (fallback ? statusSummary(fallback.status) : "Awaiting connector collection"),
@@ -126,7 +213,7 @@ export async function collectTenantCycle(repo: StatusRepository, tenant: Tenant)
     });
   }
 
-  const overallStatus = serviceResults.length > 0 ? worstStatus(serviceResults.map((entry) => entry.status)) : "unknown";
+  const overallStatus = mergedServiceResults.length > 0 ? worstStatus(mergedServiceResults.map((entry) => entry.status)) : "unknown";
   const collectedAt = nowIso();
 
   const snapshot: Snapshot = {
@@ -134,7 +221,7 @@ export async function collectTenantCycle(repo: StatusRepository, tenant: Tenant)
     tenantId: tenant.id,
     collectedAt,
     overallStatus,
-    services: serviceResults
+    services: mergedServiceResults
       .map(({ sourceConnectorId, sourceConnectorType, bannerIds, ...rest }) => rest)
       .sort((left, right) => left.serviceId.localeCompare(right.serviceId)),
     rawPayload: {

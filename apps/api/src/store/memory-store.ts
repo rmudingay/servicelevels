@@ -137,7 +137,7 @@ function defaultColorsForTenant(tenantId: string): ColorMapping[] {
     { tenantId, statusKey: "degraded", colorHex: "#D9A441", label: "Degraded" },
     { tenantId, statusKey: "down", colorHex: "#D94B4B", label: "Down" },
     { tenantId, statusKey: "maintenance", colorHex: "#4A90E2", label: "Maintenance" },
-    { tenantId, statusKey: "unknown", colorHex: "#7A7F87", label: "Unknown" }
+    { tenantId, statusKey: "unknown", colorHex: "#7C3AED", label: "No data" }
   ];
 }
 
@@ -316,7 +316,7 @@ function seedState(config: AppConfig): InternalState {
     { tenantId: tenant.id, statusKey: "degraded", colorHex: "#D9A441", label: "Degraded" },
     { tenantId: tenant.id, statusKey: "down", colorHex: "#D94B4B", label: "Down" },
     { tenantId: tenant.id, statusKey: "maintenance", colorHex: "#4A90E2", label: "Maintenance" },
-    { tenantId: tenant.id, statusKey: "unknown", colorHex: "#7A7F87", label: "Unknown" }
+    { tenantId: tenant.id, statusKey: "unknown", colorHex: "#7C3AED", label: "No data" }
   ];
 
   const snapshot: Snapshot = {
